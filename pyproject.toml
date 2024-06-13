@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "genome-kmers"
+version = "0.1.0"
+description = ""
+authors = ["Matthew Perkett"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+biopython = "^1.83"
+numba = "^0.59.1"
+numpy = "^1.26.4"
+
+
+[tool.poetry.group.dev.dependencies]
+flake8 = "^7.0.0"
+isort = "^5.13.2"
+
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.2.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
