@@ -1,12 +1,13 @@
+import numpy as np
+
+
 class SequenceCollection:
     """
     Holds all the information contained within a fasta file in a format conducive to
     kmer sorting.  Each header and its corresponding sequence is called a record.
     """
 
-    def __init__(
-        self, fasta_file_path=None, sequence_list=None, strands_to_load="both"
-    ):
+    def __init__(self, fasta_file_path=None, sequence_list=None, strands_to_load="both"):
         """
         fasta_file_path:
         sequence_list: [(header_0, seq_0), (..), ..]
@@ -94,19 +95,32 @@ class SequenceCollection:
         pass
 
     @staticmethod
-    def _get_opposite_strand_sba_index(sba_idx, sba_len):
+    def _get_opposite_strand_sba_index(sba_idx: int, sba_len: int) -> int:
         """
-        NOTE: this may need to be sped up using nb.jit.
+        Get the mapped sequence byte array index for the opposite strand.
+
+        Args:
+            sba_idx (int): sequence byte array index
+            sba_len (int): sequence byte array length
+
+        Returns:
+            opposite_strand_sba_idx (int): the converted index
         """
-        pass
+        return sba_len - 1 - sba_idx
 
     @staticmethod
-    def _get_opposite_strand_sba_start_indices(record_sba_start_indices, sba_len):
+    def _get_opposite_strand_sba_start_indices(sba_indices: np.array, sba_len: int) -> np.array:
         """
-        NOTE: this may need to be sped up using nb.jit.  Might be ok with np
-        functionality though.
+        Get the mapped sequence byte array indices for the opposite strand.
+
+        Args:
+            sba_indices (np.array): an array of sequence byte array indices
+            sba_len (int): sequence byte arrray length
+
+        Returns:
+            opposite_strand_sba_indices: the converted indices
         """
-        pass
+        return sba_len - 1 - sba_indices
 
     def _record_name_from_ba_index(self, ba_idx, ba_strand=None):
         """
