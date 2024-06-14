@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 
@@ -7,19 +9,69 @@ class SequenceCollection:
     kmer sorting.  Each header and its corresponding sequence is called a record.
     """
 
-    def __init__(self, fasta_file_path=None, sequence_list=None, strands_to_load="both"):
+    def __init__(
+        self,
+        fasta_file_path: Path = None,
+        sequence_list: list[tuple[str, str]] = None,
+        strands_to_load: str = "both",
+    ) -> None:
         """
-        fasta_file_path:
-        sequence_list: [(header_0, seq_0), (..), ..]
-        strand_to_load: "forward", "reverse_complement", "both"
+        Initializes a SequenceCollection object.
+
+        Args:
+            fasta_file_path (Path, optional): The path to the fasta formatted file to
+                be read. Defaults to None.  Must be specified if sequence_list is not.
+            sequence_list (list[tuple[str, str]], optional): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+            strands_to_load (str, optional): which strand(s) to load into memory.  One
+                of "forward", "reverse_complement", "both". Defaults to "both".
         """
-        self._strands_loaded = None
-        self.forward_sba = None
-        self.reverse_complement_sba = None
-        self._record_forward_sba_start_indices = None
-        self._record_reverse_complement_sba_start_indices = None
-        self.record_names = None
-        pass
+        # check provided arguments
+        both_args_are_none = fasta_file_path is not None and sequence_list is not None
+        neither_arg_is_none = fasta_file_path is None and sequence_list is None
+        if both_args_are_none or neither_arg_is_none:
+            raise ValueError(
+                (
+                    "Either fasta_file_path or sequence_list must be specified.  Both"
+                    "cannot be specified."
+                )
+            )
+
+        if strands_to_load not in ("forward", "reverse_complement", "both"):
+            raise ValueError(f"strands_to_load unrecognized ({strands_to_load})")
+
+        # https://www.bioinformatics.org/sms/iupac
+        self._allowed_bases = {
+            "A",
+            "C",
+            "G",
+            "T",
+            "R",
+            "Y",
+            "S",
+            "W",
+            "K",
+            "M",
+            "B",
+            "D",
+            "H",
+            "V",
+            "N",
+        }
+
+        # initialize arrays to map from from uint8 to character and vice versa
+        self._initialize_mapping_arrays()
+
+        # load sequence
+        if fasta_file_path is not None:
+            self._initialize_from_fasta()
+        else:
+            self._initialize_from_sequence_list(sequence_list, strands_to_load)
+
+        return
 
     def __len__(self):
         """
@@ -74,11 +126,77 @@ class SequenceCollection:
         """
         pass
 
+    def _initialize_mapping_arrays(self):
+        """
+        Initialize mappings between uint8 value (the dtype stored in the sequence byte
+        arrays) and the u1 value (i.e. unicode char of length 1)
+        """
+        self._uint8_to_u1_mapping = np.zeros(256, dtype="U1")
+        self._u1_to_uint8_mapping = dict()
+        for i in range(256):
+            self._u1_to_uint8_mapping[chr(i)] = i
+            self._uint8_to_u1_mapping[i] = chr(i)
+        return
+
     def _initialize_from_fasta(self, fasta_file_path):
         pass
 
-    def _initialize_from_sequence_list(self, sequence_list):
-        pass
+    def _initialize_from_sequence_list(
+        self, sequence_list: list[tuple[str, str]], strands_to_load: str
+    ):
+        """_summary_
+
+        Args:
+            sequence_list (list[tuple[str, str]]): _description_
+        """
+        self.forward_sba = None
+        self._record_forward_sba_start_indices = None
+        self.reverse_complement_sba = None
+        self._record_reverse_complement_sba_start_indices = None
+
+        # calculate the size of the sequence byte array to allocate.  Note that a '$' is placed
+        # between each sequence, which accounts for the additional length
+        total_seq_len = sum([len(sequence_list[i][1]) for i in range(len(sequence_list))])
+        sba_length = total_seq_len + len(sequence_list) - 1
+
+        if strands_to_load == "forward" or strands_to_load == "both":
+            self.forward_sba = np.zeros(sba_length, dtype=np.uint8)
+            self._record_forward_sba_start_indices = np.zeros(len(sequence_list), dtype=np.uint32)
+
+            last_filled_idx = -1
+            for i in range(len(sequence_list)):
+
+                if i != 0:
+                    self.forward_sba[last_filled_idx + 1] = self._u1_to_uint8_mapping["$"]
+                    last_filled_idx += 1
+
+                start_idx = last_filled_idx + 1
+                self._record_forward_sba_start_indices[i] = start_idx
+                seq_len = len(sequence_list[i][1])
+                for idx in range(seq_len):
+                    base = sequence_list[i][1][idx]
+                    if base not in self._allowed_bases:
+                        raise ValueError(f"base ({base}) is not an allowed base")
+                    self.forward_sba[start_idx + idx] = self._u1_to_uint8_mapping[base]
+                last_filled_idx = start_idx + seq_len - 1
+
+        elif strands_to_load == "reverse_complement" or strands_to_load == "both":
+            self.reverse_complement_sba = np.zeros(sba_length, dtype=np.uint8)
+            self._record_reverse_complement_sba_start_indices = None
+            raise NotImplementedError()
+
+        else:
+            raise ValueError(f"strands_to_load not recognized ({strands_to_load})")
+
+        # set record_names
+        self.record_names = []
+        for i in range(len(sequence_list)):
+            record_name = sequence_list[i][0]
+            self.record_names.append(record_name)
+
+        self._strands_loaded = strands_to_load
+
+        return
 
     @staticmethod
     def _reverse_complement(sba, inplace=False):
