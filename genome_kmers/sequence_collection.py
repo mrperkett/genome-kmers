@@ -213,19 +213,36 @@ class SequenceCollection:
         pass
 
     @staticmethod
-    def _get_opposite_strand_sba_index(sba_idx, sba_len):
+    def _get_opposite_strand_sba_index(sba_idx: int, sba_len: int) -> int:
         """
-        NOTE: this may need to be sped up using nb.jit.
+        Get the mapped sequence byte array index for the opposite strand.
+
+        Args:
+            sba_idx (int): sequence byte array index
+            sba_len (int): sequence byte array length
+
+        Returns:
+            opposite_strand_sba_idx (int): the converted index
         """
-        pass
+        if sba_idx < 0 or sba_idx >= sba_len:
+            raise ValueError(f"sba_idx ({sba_idx}) is out of bounds")
+        return sba_len - 1 - sba_idx
 
     @staticmethod
-    def _get_opposite_strand_sba_start_indices(record_sba_start_indices, sba_len):
+    def _get_opposite_strand_sba_indices(sba_indices: np.array, sba_len: int) -> np.array:
         """
-        NOTE: this may need to be sped up using nb.jit.  Might be ok with np
-        functionality though.
+        Get the mapped sequence byte array indices for the opposite strand.
+
+        Args:
+            sba_indices (np.array): an array of sequence byte array indices
+            sba_len (int): sequence byte arrray length
+
+        Returns:
+            opposite_strand_sba_indices: the converted indices
         """
-        pass
+        if (sba_indices < 0).any() or (sba_indices >= sba_len).any():
+            raise ValueError("There is at least one sba index that is out of bounds")
+        return sba_len - 1 - sba_indices
 
     def _record_name_from_ba_index(self, ba_idx, ba_strand=None):
         """
