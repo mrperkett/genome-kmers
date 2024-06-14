@@ -15,6 +15,8 @@ numpy = "^1.26.4"
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.0.0"
 isort = "^5.13.2"
+sphinx = "^7.3.7"
+sphinx-rtd-theme = "^2.0.0"
 
 
 [tool.poetry.group.test.dependencies]
@@ -25,7 +27,12 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.black]
-line-length = 88
+line-length = 100
 
 [tool.isort]
 profile = "black"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]

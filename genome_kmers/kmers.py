@@ -43,18 +43,18 @@ class Kmers:
         Initialize the forward and/or reverse_complement sequence byte arrays that hold
         a pointer to each
         NOTE: need to account for min_kmer_len, max_kmer_len, and
-            **max_ambiguous_bases**.  max_ambiguous bases gets tricky
-            implementation-wise.  Maybe defer this to later after profiling?
-            Could also use trick of replacing Ns with random bases?
-            Could just avoid the large N rafts and assume it will be good enough
-            behavior without further modification?
-            Identify all ranges for ambiguous bases.  Iterate over start indices
-            that do not immediately violate ambiguous base count.  Kmer is defined
-            to end when abiguous base count is met or end of seq is found.
+        **max_ambiguous_bases**.  max_ambiguous bases gets tricky
+        implementation-wise.  Maybe defer this to later after profiling?
+        Could also use trick of replacing Ns with random bases?
+        Could just avoid the large N rafts and assume it will be good enough
+        behavior without further modification?
+        Identify all ranges for ambiguous bases.  Iterate over start indices
+        that do not immediately violate ambiguous base count.  Kmer is defined
+        to end when abiguous base count is met or end of seq is found.
         NOTE: this may need to be sped up using nb.jit.  I'm not sure how tricky this
-            will be with filters
+        will be with filters
         NOTE: recommend starting not implementing filters, and then implementing
-            filters to see how it impacts performance
+        filters to see how it impacts performance
         """
         pass
 
@@ -83,7 +83,7 @@ class Kmers:
             record_seq_forward_start_idx
             record_seq_forward_end_idx
             kmer_count
-                NOTE: only allowed if unique_only is True
+            NOTE: only allowed if unique_only is True
 
         NOTE: I'm worried about performance, I would recommend a simple initial
         implementation and profiling
