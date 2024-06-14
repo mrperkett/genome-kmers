@@ -111,3 +111,64 @@ class TestSequenceCollection:
         allowed_bases = {"A", "C", "G", "T", "R", "Y", "S", "W", "K", "M", "B", "D", "H", "V", "N"}
         keys = set(seq_coll._u1_to_uint8_mapping.keys())
         assert allowed_bases - keys == set()
+
+    def test_get_opposite_strand_sba_index(self):
+        """
+        Test that _get_opposite_strand_sba_index works as expected
+        """
+        assert SequenceCollection._get_opposite_strand_sba_index(0, 10) == 9
+        assert SequenceCollection._get_opposite_strand_sba_index(9, 10) == 0
+        assert SequenceCollection._get_opposite_strand_sba_index(3, 10) == 6
+
+    def test_get_opposite_strand_sba_indices(self):
+        """
+        Test that _get_opposite_strand_sba_index works as expected
+        """
+        sba_indices = np.array([0, 17, 23], dtype=np.uint32)
+        opposite_strand_sba_indices = SequenceCollection._get_opposite_strand_sba_indices(
+            sba_indices, 30
+        )
+        expected_opposite_strand_sba_indices = np.array([29, 12, 6], dtype=np.uint32)
+        assert (opposite_strand_sba_indices == expected_opposite_strand_sba_indices).all()
+
+    def test_get_opposite_strand_sba_index_errors(self):
+        """
+        Verify that an out of bounds index will be caught
+        """
+        # index is out of bounds
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_index(-1, 10)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_index(10, 10)
+
+        # seq_len is out of bounds
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_index(0, 0)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_index(0, -1)
+
+    def test_get_opposite_strand_sba_indices_errors(self):
+        """
+        Verify that an out of bounds index will be caught
+        """
+        sba_indices = np.array([-1, 17, 23], dtype=np.uint32)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
+
+        sba_indices = np.array([0, 17, -1], dtype=np.uint32)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
+
+        sba_indices = np.array([30, 17, 23], dtype=np.uint32)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
+
+        sba_indices = np.array([0, 17, 30], dtype=np.uint32)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
+
+        # seq_len is out of bounds
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 0)
+        with pytest.raises(ValueError):
+            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, -1)

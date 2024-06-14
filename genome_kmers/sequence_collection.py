@@ -224,10 +224,12 @@ class SequenceCollection:
         Returns:
             opposite_strand_sba_idx (int): the converted index
         """
+        if sba_idx < 0 or sba_idx >= sba_len:
+            raise ValueError(f"sba_idx ({sba_idx}) is out of bounds")
         return sba_len - 1 - sba_idx
 
     @staticmethod
-    def _get_opposite_strand_sba_start_indices(sba_indices: np.array, sba_len: int) -> np.array:
+    def _get_opposite_strand_sba_indices(sba_indices: np.array, sba_len: int) -> np.array:
         """
         Get the mapped sequence byte array indices for the opposite strand.
 
@@ -238,6 +240,8 @@ class SequenceCollection:
         Returns:
             opposite_strand_sba_indices: the converted indices
         """
+        if (sba_indices < 0).any() or (sba_indices >= sba_len).any():
+            raise ValueError("There is at least one sba index that is out of bounds")
         return sba_len - 1 - sba_indices
 
     def _record_name_from_ba_index(self, ba_idx, ba_strand=None):
