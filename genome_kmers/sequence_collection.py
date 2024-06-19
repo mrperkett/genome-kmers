@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List
 
 import numpy as np
 from numba import jit
@@ -217,6 +218,116 @@ class SequenceCollection:
     def _initialize_from_fasta(self, fasta_file_path):
         pass
 
+    @staticmethod
+    def _get_required_sba_length_from_sequence_list(sequence_list: list[tuple[str, str]]) -> int:
+        """
+        Calculate the size of the sequence byte array to allocate.  Note that a '$' is placed
+        between each sequence, which accounts for the length beyond just sequence.
+
+        Args:
+            sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+
+        Raises:
+            ValueError: raised if there is a sequence in sequence_list with length 0
+
+        Returns:
+            sba_length (int): length required for sequence byte array
+        """
+        total_seq_len = 0
+        for record_name, seq in sequence_list:
+            if len(seq) == 0:
+                raise ValueError(
+                    f"Each sequence in the collection must have length > 0.  Record '{record_name}' has a sequence lengt of 0"
+                )
+            total_seq_len += len(seq)
+        sba_length = total_seq_len + len(sequence_list) - 1
+        return sba_length
+
+    def _get_sba_from_sequence_list(self, sequence_list: list[tuple[str, str]]) -> np.array:
+        """
+        Generate a sequence byte array from a sequence list.
+
+        Args:
+            sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+
+        Raises:
+            ValueError: raised when sequence contains non-allowed values
+
+        Returns:
+            sba (np.array): sequence byte array
+        """
+        sba_length = SequenceCollection._get_required_sba_length_from_sequence_list(sequence_list)
+        sba = np.zeros(sba_length, dtype=np.uint8)
+        last_filled_idx = -1
+        for i, (_, seq) in enumerate(sequence_list):
+            start_idx = last_filled_idx + 1
+            sba[start_idx : start_idx + len(seq)] = bytearray(seq, "utf-8")
+            last_filled_idx = start_idx + len(seq) - 1
+
+            # place a '$' between loaded sequences
+            if i != len(sequence_list) - 1:
+                last_filled_idx += 1
+                sba[last_filled_idx] = ord("$")
+
+        # verify that there are no unrecognized values in the sba
+        values_in_sba = set(np.unique(sba))
+        values_not_allowed = values_in_sba - self._allowed_uint8
+        if values_not_allowed != set():
+            raise ValueError(f"Sequence contains non-allowed characters! ({values_not_allowed})")
+
+        return sba
+
+    @staticmethod
+    def _get_sba_starts_from_sequence_list(sequence_list: list[tuple[str, str]]) -> np.array:
+        """
+        Generate an array of sequence start indices within the sequence byte array from
+        sequence_list.
+
+        Args:
+            sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+
+        Returns:
+            sba_starts (np.array): array with sba index for the start of the sequence (dtype=uint32)
+        """
+        sba_seq_starts = np.zeros(len(sequence_list), dtype=np.uint32)
+        last_filled_idx = -1
+        for i, (_, seq) in enumerate(sequence_list):
+            start_idx = last_filled_idx + 1
+            sba_seq_starts[i] = start_idx
+            last_filled_idx = start_idx + len(seq) - 1
+            # place a '$' between loaded sequences
+            if i != len(sequence_list) - 1:
+                last_filled_idx += 1
+        return sba_seq_starts
+
+    @staticmethod
+    def _get_record_names_from_sequence_list(sequence_list: list[tuple[str, str]]) -> List[str]:
+        """
+
+        Args:
+            sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+
+        Returns:
+        """
+        record_names = [record_name for record_name, _ in sequence_list]
+        return record_names
+
     def _initialize_from_sequence_list(
         self, sequence_list: list[tuple[str, str]], strands_to_load: str
     ):
@@ -232,62 +343,41 @@ class SequenceCollection:
             strands_to_load (str, optional): which strand(s) to load into memory.  One
                 of "forward", "reverse_complement", "both". Defaults to "forward".
         """
+        if strands_to_load not in ("forward", "reverse_complement", "both"):
+            raise ValueError(f"strands_to_load not recognized ({strands_to_load})")
+
         self.forward_sba = None
         self._forward_sba_seq_starts = None
         self.revcomp_sba = None
         self._revcomp_sba_seq_starts = None
 
-        # calculate the size of the sequence byte array to allocate.  Note that a '$' is placed
-        # between each sequence, which accounts for the additional length
-        total_seq_len = 0
-        for record_name, seq in sequence_list:
-            if len(seq) == 0:
-                raise ValueError(
-                    f"Each sequence in the collection must have length > 0.  Record '{record_name}' has a sequence lengt of 0"
-                )
-            total_seq_len += len(seq)
-        sba_length = total_seq_len + len(sequence_list) - 1
+        if strands_to_load == "forward" or strands_to_load == "both":
+            self.forward_sba = self._get_sba_from_sequence_list(sequence_list)
+            self._forward_sba_seq_starts = self._get_sba_starts_from_sequence_list(sequence_list)
 
         if strands_to_load == "both":
-            raise NotImplementedError()
+            # take advantage of having forward_sba  and _forward_sba_seq_starts already loaded
+            # into memory.  We need only copy the array and reverse_complement.
+            self.revcomp_sba = np.copy(self.forward_sba)
+            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
-        if strands_to_load == "forward" or strands_to_load == "both":
-            self.forward_sba = np.zeros(sba_length, dtype=np.uint8)
-            self._forward_sba_seq_starts = np.zeros(len(sequence_list), dtype=np.uint32)
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+                self._forward_sba_seq_starts,
+                len(self.revcomp_sba),
+            )
 
-            last_filled_idx = -1
-            for i, (record_name, seq) in enumerate(sequence_list):
-                start_idx = last_filled_idx + 1
-                self._forward_sba_seq_starts[i] = start_idx
-                self.forward_sba[start_idx : start_idx + len(seq)] = bytearray(seq, "utf-8")
-                last_filled_idx = start_idx + len(seq) - 1
+        elif strands_to_load == "reverse_complement":
+            # load forward strand information and then reverse complement in place
+            self.revcomp_sba = self._get_sba_from_sequence_list(sequence_list)
+            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
-                # place a '$' between loaded sequences
-                if i != len(sequence_list) - 1:
-                    last_filled_idx += 1
-                    self.forward_sba[last_filled_idx] = ord("$")
+            self._revcomp_sba_seq_starts = self._get_sba_starts_from_sequence_list(sequence_list)
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+                self._revcomp_sba_seq_starts,
+                len(self.revcomp_sba),
+            )
 
-            values_in_sba = set(np.unique(self.forward_sba))
-            values_not_allowed = values_in_sba - self._allowed_uint8
-            if values_not_allowed != set():
-                raise ValueError(
-                    f"Sequence contains non-allowed characters! ({values_not_allowed})"
-                )
-
-        elif strands_to_load == "reverse_complement" or strands_to_load == "both":
-            self.revcomp_sba = np.zeros(sba_length, dtype=np.uint8)
-            self._revcomp_sba_seq_starts = None
-            raise NotImplementedError()
-
-        else:
-            raise ValueError(f"strands_to_load not recognized ({strands_to_load})")
-
-        # set record_names
-        self.record_names = []
-        for i in range(len(sequence_list)):
-            record_name = sequence_list[i][0]
-            self.record_names.append(record_name)
-
+        self.record_names = self._get_record_names_from_sequence_list(sequence_list)
         self._strands_loaded = strands_to_load
 
         return

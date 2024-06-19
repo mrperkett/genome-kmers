@@ -5,11 +5,27 @@ from genome_kmers.sequence_collection import SequenceCollection, reverse_complem
 
 
 class TestSequenceCollection:
-    # >>> ord("A"), ord("T"), ord("G"), ord("C"), ord("$")
-    # (65, 84, 71, 67, 36)
+    # example sequence_list and expected values (single chromosome)
     seq_list_1 = [("chr1", "ATCGAATTAG")]
-    seq_list_2 = [("chr1", "ATCGAATTAG"), ("chr2", "GGATCTTGCATT"), ("chr3", "GTGATTGACCCCT")]
+    seq_1 = "ATCGAATTAG"
+    revcomp_seq_1 = "CTAATTCGAT"
+    expected_forward_sba_seq_starts_1 = np.array([0], dtype=np.uint32)
+    expected_revcomp_sba_seq_starts_1 = np.array([9], dtype=np.uint32)
+    expected_forward_sba_1 = np.array([ord(base) for base in seq_1], dtype=np.uint8)
+    expected_revcomp_sba_1 = np.array([ord(base) for base in revcomp_seq_1], dtype=np.uint8)
+    record_names_1 = ["chr1"]
 
+    # example sequence_list and expected values (three chromosomes)
+    seq_list_2 = [("chr1", "ATCGAATTAG"), ("chr2", "GGATCTTGCATT"), ("chr3", "GTGATTGACCCCT")]
+    seq_2 = "ATCGAATTAG$GGATCTTGCATT$GTGATTGACCCCT"
+    revcomp_seq_2 = "AGGGGTCAATCAC$AATGCAAGATCC$CTAATTCGAT"
+    expected_forward_sba_seq_starts_2 = np.array([0, 11, 24], dtype=np.uint32)
+    expected_revcomp_sba_seq_starts_2 = np.array([36, 25, 12], dtype=np.uint32)
+    expected_forward_sba_2 = np.array([ord(base) for base in seq_2], dtype=np.uint8)
+    expected_revcomp_sba_2 = np.array([ord(base) for base in revcomp_seq_2], dtype=np.uint8)
+    record_names_2 = ["chr1", "chr2", "chr3"]
+
+    # For testing reverse_complement
     seqs = [
         "",
         "A",
@@ -38,47 +54,133 @@ class TestSequenceCollection:
         [("chr1", "AGCAGCCGGGT"), ("chr2", "CTTAGGGAGGTGTGAGCC")],
     ]
 
-    def test_init_01(self):
+    def test_forward_init_01(self):
         """
         Test sequence_list constructor with single chromosome
         """
-
         seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
 
-        assert (
-            seq_coll.forward_sba
-            == np.array([65, 84, 67, 71, 65, 65, 84, 84, 65, 71], dtype=np.uint8)
-        ).all()
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_1)
         assert seq_coll.revcomp_sba is None
 
-        assert seq_coll._forward_sba_seq_starts == np.array([0], dtype=np.uint32)
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_1
+        )
         assert seq_coll._revcomp_sba_seq_starts is None
 
-        assert seq_coll.record_names == ["chr1"]
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_1
         assert seq_coll._strands_loaded == "forward"
 
-    def test_init_02(self):
+    def test_forward_init_02(self):
         """
         Test sequence_list constructor with three chromosomes
         """
-
         seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
 
-        expected_forward_sba = np.zeros(37, dtype=np.uint8)
-        expected_forward_sba[:10] = [65, 84, 67, 71, 65, 65, 84, 84, 65, 71]
-        expected_forward_sba[10] = 36
-        expected_forward_sba[11:23] = [71, 71, 65, 84, 67, 84, 84, 71, 67, 65, 84, 84]
-        expected_forward_sba[23] = 36
-        expected_forward_sba[24:] = [71, 84, 71, 65, 84, 84, 71, 65, 67, 67, 67, 67, 84]
-        assert (seq_coll.forward_sba == expected_forward_sba).all()
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_2)
         assert seq_coll.revcomp_sba is None
 
-        expected_record_start_indices = np.array([0, 11, 24], dtype=np.uint32)
-        assert (seq_coll._forward_sba_seq_starts == expected_record_start_indices).all()
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_2
+        )
         assert seq_coll._revcomp_sba_seq_starts is None
 
-        assert seq_coll.record_names == ["chr1", "chr2", "chr3"]
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_2
         assert seq_coll._strands_loaded == "forward"
+
+    def test_revcomp_init_01(self):
+        """
+        Test sequence_list constructor with single chromosome
+        """
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_1, strands_to_load="reverse_complement"
+        )
+
+        # check sequence byte arrays
+        assert seq_coll.forward_sba is None
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_1)
+
+        # check seq start arrays
+        assert seq_coll._forward_sba_seq_starts is None
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_1
+        )
+
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_1
+        assert seq_coll._strands_loaded == "reverse_complement"
+
+    def test_revcomp_init_02(self):
+        """
+        Test sequence_list constructor with three chromosomes
+        """
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
+        )
+
+        # check sequence byte arrays
+        assert seq_coll.forward_sba is None
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_2)
+
+        # check seq start arrays
+        assert seq_coll._forward_sba_seq_starts is None
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_2
+        )
+
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_2
+        assert seq_coll._strands_loaded == "reverse_complement"
+
+    def test_both_init_01(self):
+        """
+        Test sequence_list constructor with single chromosome
+        """
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="both")
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_1)
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_1)
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_1
+        )
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_1
+        )
+
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_1
+        assert seq_coll._strands_loaded == "both"
+
+    def test_both_init_02(self):
+        """
+        Test sequence_list constructor with three chromosomes
+        """
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_2)
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_2)
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_2
+        )
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_2
+        )
+
+        # check other values that should be set
+        assert seq_coll.record_names == self.record_names_2
+        assert seq_coll._strands_loaded == "both"
 
     def test_init_error_01(self):
         """
@@ -306,8 +408,6 @@ class TestSequenceCollection:
         """
         Cannot have both strands loaded.
         """
-        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
-        # TODO: replace this when strands_to_load="both" has been implemented
-        seq_coll._strands_loaded = "both"
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="both")
         with pytest.raises(ValueError):
             seq_coll.reverse_complement()
