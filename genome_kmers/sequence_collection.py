@@ -1,8 +1,41 @@
 from pathlib import Path
 
 import numpy as np
+from numba import jit
 from numba.core import types
 from numba.typed import Dict
+
+
+@jit
+def reverse_complement(sba: np.array, complement_mapping_arr: np.array, inplace=False) -> np.array:
+    """
+    Reverse complement sequence byte array (sba) using the uint8 to uint8 mapping array
+    (complement_mapping_arr).  This function uses numba.jit for performance.
+
+    Args:
+        sba (np.array): sequence byte array (dtype=uint8)
+        complement_mapping_arr (np.array): maps from sequence byte array value (uint8) to
+            complement sequence byte array value (uint8)
+        inplace (bool, optional): whether to perform in place or return a newly created array.
+            Defaults to False.
+
+    Returns:
+        np.array: reverse complemented sequence byte array
+    """
+    if inplace:
+        for idx in range((len(sba) + 1) // 2):
+            rc_idx = len(sba) - 1 - idx
+            front_byte = sba[idx]
+            back_byte = sba[rc_idx]
+            sba[idx] = complement_mapping_arr[back_byte]
+            sba[rc_idx] = complement_mapping_arr[front_byte]
+        reverse_complement_arr = sba
+    else:
+        reverse_complement_arr = np.zeros(len(sba), dtype=np.uint8)
+        for idx in range(len(sba)):
+            rc_idx = rc_idx = len(sba) - 1 - idx
+            reverse_complement_arr[rc_idx] = complement_mapping_arr[sba[idx]]
+    return reverse_complement_arr
 
 
 class SequenceCollection:
@@ -67,6 +100,7 @@ class SequenceCollection:
         self._allowed_uint8 = {ord(base) for base in self._allowed_bases}
 
         # initialize arrays to map from from uint8 to character and vice versa
+        self._complement_mapping_arr = SequenceCollection._get_complement_mapping_array()
         self._initialize_mapping_arrays()
 
         # load sequence
@@ -130,6 +164,39 @@ class SequenceCollection:
         """
         pass
 
+    @staticmethod
+    def _get_complement_mapping_array():
+        """
+        Initialize the reverse_complement byte mapping array
+        """
+        # https://www.bioinformatics.org/sms/iupac
+        # '$' is a special character that is used to mark the boundary between records in the
+        # sequence byte array
+        complement_mapping_dict = {
+            "A": "T",
+            "C": "G",
+            "G": "C",
+            "T": "A",
+            "R": "Y",
+            "Y": "R",
+            "S": "S",
+            "W": "W",
+            "K": "M",
+            "M": "K",
+            "B": "V",
+            "D": "H",
+            "H": "D",
+            "V": "B",
+            "N": "N",
+            "$": "$",
+        }
+
+        # build array mapping
+        complement_mapping_arr = np.zeros(256, dtype=np.uint8)
+        for key, val in complement_mapping_dict.items():
+            complement_mapping_arr[ord(key)] = ord(val)
+        return complement_mapping_arr
+
     def _initialize_mapping_arrays(self):
         """
         Initialize mappings between uint8 value (the dtype stored in the sequence byte
@@ -172,7 +239,13 @@ class SequenceCollection:
 
         # calculate the size of the sequence byte array to allocate.  Note that a '$' is placed
         # between each sequence, which accounts for the additional length
-        total_seq_len = sum([len(sequence_list[i][1]) for i in range(len(sequence_list))])
+        total_seq_len = 0
+        for record_name, seq in sequence_list:
+            if len(seq) == 0:
+                raise ValueError(
+                    f"Each sequence in the collection must have length > 0.  Record '{record_name}' has a sequence lengt of 0"
+                )
+            total_seq_len += len(seq)
         sba_length = total_seq_len + len(sequence_list) - 1
 
         if strands_to_load == "both":
@@ -219,19 +292,37 @@ class SequenceCollection:
 
         return
 
-    @staticmethod
-    def _reverse_complement(sba, inplace=False):
+    def reverse_complement(self) -> np.array:
         """
-        Used to reverse complement an array (e.g. self.forward_sba).  inplace is useful
-        if you only need a single strand when you are done and you don't want to
-        temporarily double your memory footprint.
-
-        NOTE: will likely need nb.jit implementation
-
-        Return:
-            sba
+        Reverse complement the sequence byte array.  Only valid if a single strand is loaded.
         """
-        pass
+        if self._strands_loaded == "both":
+            raise ValueError(f"self._strands_loaded ({self._strands_loaded}) cannot be 'both'")
+
+        if self._strands_loaded == "forward":
+            self.revcomp_sba = self.forward_sba
+            self.forward_sba = None
+            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
+            self._revcomp_sba_seq_starts = self._forward_sba_seq_starts
+            self._forward_sba_seq_starts = None
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+                self._revcomp_sba_seq_starts,
+                len(self.revcomp_sba),
+            )
+            self._strands_loaded = "reverse_complement"
+        elif self._strands_loaded == "reverse_complement":
+            self.forward_sba = self.revcomp_sba
+            self.revcomp_sba = None
+            reverse_complement(self.forward_sba, self._complement_mapping_arr, inplace=True)
+            self._forward_sba_seq_starts = self._revcomp_sba_seq_starts
+            self._revcomp_sba_seq_starts = None
+            self._forward_sba_seq_starts = self._get_opposite_strand_sba_indices(
+                self._forward_sba_seq_starts,
+                len(self.revcomp_sba),
+            )
+            self._strands_loaded = "forward"
+
+        return
 
     @staticmethod
     def _get_opposite_strand_sba_index(sba_idx: int, sba_len: int) -> int:

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from genome_kmers.sequence_collection import SequenceCollection
+from genome_kmers.sequence_collection import SequenceCollection, reverse_complement
 
 
 class TestSequenceCollection:
@@ -9,6 +9,34 @@ class TestSequenceCollection:
     # (65, 84, 71, 67, 36)
     seq_list_1 = [("chr1", "ATCGAATTAG")]
     seq_list_2 = [("chr1", "ATCGAATTAG"), ("chr2", "GGATCTTGCATT"), ("chr3", "GTGATTGACCCCT")]
+
+    seqs = [
+        "",
+        "A",
+        "T",
+        "G",
+        "C",
+        "AGCAGCCGGGT",
+        "AGCAGCCGGGT$CTTAGGGAGGTGTGAGCC",
+    ]
+    expected_rc_seqs = [
+        "",
+        "T",
+        "A",
+        "C",
+        "G",
+        "ACCCGGCTGCT",
+        "GGCTCACACCTCCCTAAG$ACCCGGCTGCT",
+    ]
+    seq_lists = [
+        [("chr1", "")],
+        [("chr1", "A")],
+        [("chr1", "T")],
+        [("chr1", "G")],
+        [("chr1", "C")],
+        [("chr1", "AGCAGCCGGGT")],
+        [("chr1", "AGCAGCCGGGT"), ("chr2", "CTTAGGGAGGTGTGAGCC")],
+    ]
 
     def test_init_01(self):
         """
@@ -84,6 +112,18 @@ class TestSequenceCollection:
         Non-allowed base
         """
         seq_list = [("chr1", "ATCGAATTA.")]
+        with pytest.raises(ValueError):
+            SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+
+    def test_init_error_05(self):
+        """
+        Empty sequence
+        """
+        seq_list = [("chr1", "")]
+        with pytest.raises(ValueError):
+            SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+
+        seq_list = [("chr1", "ATCGAATTA"), ("chr2", ""), ("chr3", "AAAATGC")]
         with pytest.raises(ValueError):
             SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
 
@@ -172,3 +212,102 @@ class TestSequenceCollection:
             SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 0)
         with pytest.raises(ValueError):
             SequenceCollection._get_opposite_strand_sba_indices(sba_indices, -1)
+
+    def test_get_complement_mapping_array(self):
+        """
+        Does complement array look as it should?
+        """
+        complement_arr = SequenceCollection._get_complement_mapping_array()
+        assert complement_arr[ord("A")] == ord("T")
+        assert complement_arr[ord("T")] == ord("A")
+        assert complement_arr[ord("G")] == ord("C")
+        assert complement_arr[ord("C")] == ord("G")
+        assert complement_arr[ord("$")] == ord("$")
+
+    def test_reverse_complement_func_not_inplace(self):
+        """
+        Test that the global reverse_complement function works as intended for inplace=False.
+        """
+        for seq, expected_rc_seq in zip(self.seqs, self.expected_rc_seqs):
+            expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
+            sba = np.array([ord(base) for base in seq], dtype=np.uint8)
+            complement_arr = SequenceCollection._get_complement_mapping_array()
+            rc_sba = reverse_complement(sba, complement_arr, inplace=False)
+
+            # verify that rc_sba matches sba
+            assert rc_sba.dtype == np.uint8
+            if not np.array_equal(rc_sba, expected_rc_sba):
+                raise AssertionError(
+                    f"sequence byte arrays are not equal when reverse complementing seq '{seq}'"
+                )
+            # verify that rc_sba is not the same object as sba since inplace=False
+            if len(sba) > 0:
+                assert sba[0] != 255
+                sba[0] = 255
+                if sba[0] == rc_sba[0]:
+                    raise AssertionError("Changing a value in sba also changes the value in rc_sba")
+
+    def test_reverse_complement_func_inplace(self):
+        """
+        Test that the global reverse_complement function works as intended for inplace=False.
+        """
+        for seq, expected_rc_seq in zip(self.seqs, self.expected_rc_seqs):
+            expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
+            sba = np.array([ord(base) for base in seq], dtype=np.uint8)
+            complement_arr = SequenceCollection._get_complement_mapping_array()
+            rc_sba = reverse_complement(sba, complement_arr, inplace=True)
+
+            # verify that rc_sba matches sba
+            assert rc_sba.dtype == np.uint8
+            if not np.array_equal(rc_sba, expected_rc_sba):
+                raise AssertionError(
+                    f"sequence byte arrays are not equal when reverse complementing seq '{seq}'"
+                )
+            # verify that rc_sba is the same object as sba since inplace=True
+            if len(sba) > 0:
+                assert sba[0] != 255
+                sba[0] = 255
+                if sba[0] != rc_sba[0]:
+                    raise AssertionError("sba and rc_sba are not the same object")
+
+    def test_reverse_complement(self):
+        """
+        Test the SequenceCollection class method reverse_complement
+        """
+        for seq, expected_rc_seq, seq_list in zip(self.seqs, self.expected_rc_seqs, self.seq_lists):
+            # only test sequences of length greater than zero
+            if seq == "":
+                continue
+
+            # build expected sba for initial load and for after the reverse complement
+            expected_sba = np.array([ord(base) for base in seq], dtype=np.uint8)
+            expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
+
+            # initialize a sequence collection on seq_list
+            seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+
+            # check that everything matches what is expected before reverse complement
+            assert seq_coll._strands_loaded == "forward"
+            assert np.array_equal(seq_coll.forward_sba, expected_sba)
+            assert seq_coll._forward_sba_seq_starts is not None
+            assert seq_coll.revcomp_sba is None
+            assert seq_coll._revcomp_sba_seq_starts is None
+
+            seq_coll.reverse_complement()
+
+            # check that everything matches what is expected after reverse complement
+            assert seq_coll._strands_loaded == "reverse_complement"
+            assert seq_coll.forward_sba is None
+            assert seq_coll._forward_sba_seq_starts is None
+            assert np.array_equal(seq_coll.revcomp_sba, expected_rc_sba)
+            assert seq_coll._revcomp_sba_seq_starts is not None
+
+    def test_reverse_complement_error(self):
+        """
+        Cannot have both strands loaded.
+        """
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
+        # TODO: replace this when strands_to_load="both" has been implemented
+        seq_coll._strands_loaded = "both"
+        with pytest.raises(ValueError):
+            seq_coll.reverse_complement()
