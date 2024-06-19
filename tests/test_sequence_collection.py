@@ -21,10 +21,10 @@ class TestSequenceCollection:
             seq_coll.forward_sba
             == np.array([65, 84, 67, 71, 65, 65, 84, 84, 65, 71], dtype=np.uint8)
         ).all()
-        assert seq_coll.reverse_complement_sba is None
+        assert seq_coll.revcomp_sba is None
 
-        assert seq_coll._record_forward_sba_start_indices == np.array([0], dtype=np.uint32)
-        assert seq_coll._record_reverse_complement_sba_start_indices is None
+        assert seq_coll._forward_sba_seq_starts == np.array([0], dtype=np.uint32)
+        assert seq_coll._revcomp_sba_seq_starts is None
 
         assert seq_coll.record_names == ["chr1"]
         assert seq_coll._strands_loaded == "forward"
@@ -43,11 +43,11 @@ class TestSequenceCollection:
         expected_forward_sba[23] = 36
         expected_forward_sba[24:] = [71, 84, 71, 65, 84, 84, 71, 65, 67, 67, 67, 67, 84]
         assert (seq_coll.forward_sba == expected_forward_sba).all()
-        assert seq_coll.reverse_complement_sba is None
+        assert seq_coll.revcomp_sba is None
 
         expected_record_start_indices = np.array([0, 11, 24], dtype=np.uint32)
-        assert (seq_coll._record_forward_sba_start_indices == expected_record_start_indices).all()
-        assert seq_coll._record_reverse_complement_sba_start_indices is None
+        assert (seq_coll._forward_sba_seq_starts == expected_record_start_indices).all()
+        assert seq_coll._revcomp_sba_seq_starts is None
 
         assert seq_coll.record_names == ["chr1", "chr2", "chr3"]
         assert seq_coll._strands_loaded == "forward"

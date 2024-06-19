@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import numpy as np
+from numba.core import types
+from numba.typed import Dict
 
 
 class SequenceCollection:
@@ -13,7 +15,7 @@ class SequenceCollection:
         self,
         fasta_file_path: Path = None,
         sequence_list: list[tuple[str, str]] = None,
-        strands_to_load: str = "both",
+        strands_to_load: str = "forward",
     ) -> None:
         """
         Initializes a SequenceCollection object.
@@ -27,7 +29,7 @@ class SequenceCollection:
                 (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
                 is not.
             strands_to_load (str, optional): which strand(s) to load into memory.  One
-                of "forward", "reverse_complement", "both". Defaults to "both".
+                of "forward", "reverse_complement", "both". Defaults to "forward".
         """
         # check provided arguments
         both_args_are_none = fasta_file_path is not None and sequence_list is not None
@@ -60,7 +62,9 @@ class SequenceCollection:
             "H",
             "V",
             "N",
+            "$",
         }
+        self._allowed_uint8 = {ord(base) for base in self._allowed_bases}
 
         # initialize arrays to map from from uint8 to character and vice versa
         self._initialize_mapping_arrays()
@@ -133,9 +137,14 @@ class SequenceCollection:
         """
         self._uint8_to_u1_mapping = np.zeros(256, dtype="U1")
         self._u1_to_uint8_mapping = dict()
+        self._numba_unicode_to_uint8_mapping = Dict.empty(
+            key_type=types.unicode_type, value_type=types.uint8
+        )
         for i in range(256):
             self._u1_to_uint8_mapping[chr(i)] = i
+            self._numba_unicode_to_uint8_mapping[chr(i)] = types.uint8(i)
             self._uint8_to_u1_mapping[i] = chr(i)
+
         return
 
     def _initialize_from_fasta(self, fasta_file_path):
@@ -144,45 +153,57 @@ class SequenceCollection:
     def _initialize_from_sequence_list(
         self, sequence_list: list[tuple[str, str]], strands_to_load: str
     ):
-        """_summary_
+        """
+        Loads the sequence records from a list of (seq_id, seq) tuples.
 
         Args:
-            sequence_list (list[tuple[str, str]]): _description_
+            sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
+                tuples defining a sequence collection. seq_id is the sequences id (i.e.
+                the header in a fasta file, such as "chr1"). seq is the string sequence
+                (e.g. "ACTG"). Defaults to None. Must be specified if fasta_file_path
+                is not.
+            strands_to_load (str, optional): which strand(s) to load into memory.  One
+                of "forward", "reverse_complement", "both". Defaults to "forward".
         """
         self.forward_sba = None
-        self._record_forward_sba_start_indices = None
-        self.reverse_complement_sba = None
-        self._record_reverse_complement_sba_start_indices = None
+        self._forward_sba_seq_starts = None
+        self.revcomp_sba = None
+        self._revcomp_sba_seq_starts = None
 
         # calculate the size of the sequence byte array to allocate.  Note that a '$' is placed
         # between each sequence, which accounts for the additional length
         total_seq_len = sum([len(sequence_list[i][1]) for i in range(len(sequence_list))])
         sba_length = total_seq_len + len(sequence_list) - 1
 
+        if strands_to_load == "both":
+            raise NotImplementedError()
+
         if strands_to_load == "forward" or strands_to_load == "both":
             self.forward_sba = np.zeros(sba_length, dtype=np.uint8)
-            self._record_forward_sba_start_indices = np.zeros(len(sequence_list), dtype=np.uint32)
+            self._forward_sba_seq_starts = np.zeros(len(sequence_list), dtype=np.uint32)
 
             last_filled_idx = -1
-            for i in range(len(sequence_list)):
-
-                if i != 0:
-                    self.forward_sba[last_filled_idx + 1] = self._u1_to_uint8_mapping["$"]
-                    last_filled_idx += 1
-
+            for i, (record_name, seq) in enumerate(sequence_list):
                 start_idx = last_filled_idx + 1
-                self._record_forward_sba_start_indices[i] = start_idx
-                seq_len = len(sequence_list[i][1])
-                for idx in range(seq_len):
-                    base = sequence_list[i][1][idx]
-                    if base not in self._allowed_bases:
-                        raise ValueError(f"base ({base}) is not an allowed base")
-                    self.forward_sba[start_idx + idx] = self._u1_to_uint8_mapping[base]
-                last_filled_idx = start_idx + seq_len - 1
+                self._forward_sba_seq_starts[i] = start_idx
+                self.forward_sba[start_idx : start_idx + len(seq)] = bytearray(seq, "utf-8")
+                last_filled_idx = start_idx + len(seq) - 1
+
+                # place a '$' between loaded sequences
+                if i != len(sequence_list) - 1:
+                    last_filled_idx += 1
+                    self.forward_sba[last_filled_idx] = ord("$")
+
+            values_in_sba = set(np.unique(self.forward_sba))
+            values_not_allowed = values_in_sba - self._allowed_uint8
+            if values_not_allowed != set():
+                raise ValueError(
+                    f"Sequence contains non-allowed characters! ({values_not_allowed})"
+                )
 
         elif strands_to_load == "reverse_complement" or strands_to_load == "both":
-            self.reverse_complement_sba = np.zeros(sba_length, dtype=np.uint8)
-            self._record_reverse_complement_sba_start_indices = None
+            self.revcomp_sba = np.zeros(sba_length, dtype=np.uint8)
+            self._revcomp_sba_seq_starts = None
             raise NotImplementedError()
 
         else:
