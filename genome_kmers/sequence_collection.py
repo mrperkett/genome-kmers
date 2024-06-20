@@ -1,3 +1,4 @@
+from bisect import bisect_right
 from pathlib import Path
 from typing import List
 
@@ -361,7 +362,7 @@ class SequenceCollection:
             self.revcomp_sba = np.copy(self.forward_sba)
             reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
                 self._forward_sba_seq_starts,
                 len(self.revcomp_sba),
             )
@@ -372,7 +373,7 @@ class SequenceCollection:
             reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
             self._revcomp_sba_seq_starts = self._get_sba_starts_from_sequence_list(sequence_list)
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
                 self._revcomp_sba_seq_starts,
                 len(self.revcomp_sba),
             )
@@ -395,7 +396,7 @@ class SequenceCollection:
             reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
             self._revcomp_sba_seq_starts = self._forward_sba_seq_starts
             self._forward_sba_seq_starts = None
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_indices(
+            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
                 self._revcomp_sba_seq_starts,
                 len(self.revcomp_sba),
             )
@@ -406,7 +407,7 @@ class SequenceCollection:
             reverse_complement(self.forward_sba, self._complement_mapping_arr, inplace=True)
             self._forward_sba_seq_starts = self._revcomp_sba_seq_starts
             self._revcomp_sba_seq_starts = None
-            self._forward_sba_seq_starts = self._get_opposite_strand_sba_indices(
+            self._forward_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
                 self._forward_sba_seq_starts,
                 len(self.revcomp_sba),
             )
@@ -446,14 +447,109 @@ class SequenceCollection:
             raise ValueError("There is at least one sba index that is out of bounds")
         return sba_len - 1 - sba_indices
 
-    def _record_name_from_ba_index(self, ba_idx, ba_strand=None):
+    @staticmethod
+    def _get_opposite_strand_sba_start_indices(sba_starts: np.array, sba_len: int) -> np.array:
+        """
+        Get the sba_start_indices for the opposite strand.  A sba_start_index is defined as the
+        leftmost inclusive start index of the corresponding sequence.  The sba_start_indices are
+        ordered from smallest to largest.
+
+        Args:
+            sba_starts (np.array): sequence byte array start indices dtype=np.unit32
+            sba_len (int): total length of the sequence byte array
+
+        Returns:
+            opposite_strand_start_indices (np.array): sequence byte array start indices for
+                the reverse complement.
+        """
+        # NOTE: The start of each sequence on the opposite strand is the current end of the
+        # sequence.  Also, the order will need to be reversed to keep it in ascending order
+        sba_end_indices = np.copy(sba_starts)
+        if len(sba_end_indices) > 1:
+            sba_end_indices[:-1] = sba_end_indices[1:] - 2
+        sba_end_indices[-1] = sba_len - 1
+        opposite_strand_start_indices = SequenceCollection._get_opposite_strand_sba_indices(
+            np.flip(sba_end_indices), sba_len
+        )
+        return opposite_strand_start_indices
+
+    def record_name_from_sba_index(self, ba_idx, ba_strand=None):
         """
         NOTE: this may need to be sped up using nb.jit.
         """
         pass
 
-    def _get_record_num_from_ba_index(self, ba_idx, ba_strand=None):
+    @staticmethod
+    def _get_record_num_from_sba_index(sba_seq_starts: np.array, sba_idx: int) -> int:
         """
-        NOTE: this may need to be sped up using nb.jit.
+        Get the sequence record number from the sequence byte array index.
+
+        NOTE: no checking of argument values is done in this function.  If checking is required, it
+        should be done through the wrapper function get_record_num_from_sba_idx.
+
+        Args:
+            sba_seq_starts (np.array): sequence byte array start indices dtype=np.unit32
+            sba_idx (int): sequence byte array index
+
+        Returns:
+            record_num (int):
         """
-        pass
+        # TODO: if this is too slow in profiling, an alternative implementation is to generate a
+        # look-up table that takes O(1) average look-up time if the distribution of sequence lengths
+        # isn't too wide. Define an array of length (sba_len / N) and populate each index
+        # (sba_idx // N) with the sba_idx.  Choose N to be small enough to ensure O(1) lookup time.
+        # Will have bad memory usage in worst case (e.g. 1 length 1e7, 1e7 of length 1)
+
+        # use Python's bisect function to do O(log(N)) search for the correct record number using
+        # _forward_sba_seq_starts or _revcomp_sba_seq_starts
+        return bisect_right(sba_seq_starts, sba_idx) - 1
+
+    def get_record_num_from_sba_index(self, sba_idx: int, sba_strand: str = None) -> int:
+        """
+        Get the sequence record number from the sequence byte array index defined on sba_strand
+        (attempt to automatically detect the strand if not specified)
+
+        Args:
+            sba_idx (int): sequence byte array index
+            sba_strand (str, optional): for which strand is the sba_idx defined ("forward" or
+                "reverse_complement").  Must be defined when SequenceCollection has both
+                strands loaded.  If specified when only a single strand has been loaded, it will
+                verify that it matches what is expected.  If set to None, it will automatically
+                detect the strand that was loaded.  Defaults to None.
+
+        Returns:
+            record_num (int):
+        """
+        # sba_strand only needs to be specified for self._strands_loaded == "both".  If provided
+        # for "forward" or "reverse_complement", it is verified to match
+        if sba_strand is not None:
+            if sba_strand == "forward":
+                if self._strands_loaded == "reverse_complement":
+                    raise ValueError(
+                        f"sba_strand ({sba_strand}) does not match _strands_loaded ({self._strands_loaded})"
+                    )
+            elif sba_strand == "reverse_complement":
+                if self._strands_loaded == "forward":
+                    raise ValueError(
+                        f"sba_strand ({sba_strand}) does not match _strands_loaded ({self._strands_loaded})"
+                    )
+            else:
+                raise ValueError(f"sba_strand ({sba_strand}) not recognized")
+        if self._strands_loaded == "both" and sba_strand is None:
+            raise ValueError("sba_strand must be specified when both strands are loaded")
+
+        # get the record number
+        if self._strands_loaded == "forward" or sba_strand == "forward":
+            if sba_idx < 0 or sba_idx >= len(self.forward_sba):
+                raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
+            record_num = SequenceCollection._get_record_num_from_sba_index(
+                self._forward_sba_seq_starts, sba_idx
+            )
+        elif self._strands_loaded == "reverse_complement" or sba_strand == "reverse_complement":
+            if sba_idx < 0 or sba_idx >= len(self.revcomp_sba):
+                raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
+            record_num = SequenceCollection._get_record_num_from_sba_index(
+                self._revcomp_sba_seq_starts, sba_idx
+            )
+
+        return record_num
