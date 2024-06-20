@@ -240,6 +240,14 @@ class TestInit(TestSequenceCollection):
         with pytest.raises(ValueError):
             SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
 
+    def test_init_error_06(self):
+        """
+        Repeated sequence record name
+        """
+        seq_list = [("chr1", "ATCGAATTA"), ("chr1", "AAAATGC")]
+        with pytest.raises(ValueError):
+            SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+
     def test_initialize_mapping_arrays(self):
         """
         Verify that mapping arrays initilize correctly
@@ -436,22 +444,28 @@ class TestReverseComplement(TestSequenceCollection):
             seq_coll.reverse_complement()
 
 
-class TestGetRecordNum(TestSequenceCollection):
+class TestGetRecord(TestSequenceCollection):
     """
-    Test get_record_num method
+    Test get_record_num and get_record_name methods
     """
 
     @staticmethod
-    def get_expected_record_num(sba_start_indices, sba_idx):
+    def get_expected_record_num(sba_start_indices, sba_idx, sba_strand):
         for i in range(len(sba_start_indices)):
             lower_bound = sba_start_indices[i]
             upper_bound = sba_start_indices[i + 1] if i != len(sba_start_indices) - 1 else 9e99
             if lower_bound <= sba_idx < upper_bound:
-                return i
+                if sba_strand == "forward":
+                    return i
+                elif sba_strand == "reverse_complement":
+                    # if it is the reverse_complement strand, need to account for the fact that
+                    # it will give the nth from the left sequence record, but the sequences have
+                    # been reversed
+                    return len(sba_start_indices) - 1 - i
         raise AssertionError(f"Could not get expected record num.  Logic error in helper function.")
 
     @staticmethod
-    def _test_get_record_num(seq_list, strands_to_load, sba_strand, expected_sba_seq_starts):
+    def _test_get_record(seq_list, strands_to_load, sba_strand, expected_sba_seq_starts):
         """
         Helper function to test
 
@@ -471,89 +485,115 @@ class TestGetRecordNum(TestSequenceCollection):
         # expected
         seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load=strands_to_load)
         for sba_idx in range(sba_len):
+            # check record_num matches what is expected
             record_num = seq_coll.get_record_num_from_sba_index(sba_idx, sba_strand=sba_strand)
-            expected_record_num = TestGetRecordNum.get_expected_record_num(
-                expected_sba_seq_starts, sba_idx
+            actual_sba_strand = sba_strand if sba_strand is not None else strands_to_load
+            expected_record_num = TestGetRecord.get_expected_record_num(
+                expected_sba_seq_starts, sba_idx, actual_sba_strand
             )
             assert record_num == expected_record_num
 
-    def test_get_record_num_from_sba_index_01(self):
+            # check record_name matches was is expected
+            record_name = seq_coll.get_record_name_from_sba_index(sba_idx, sba_strand)
+            expected_record_name = seq_list[record_num][0]
+            assert record_name == expected_record_name
+
+    def test_get_record_from_sba_index_01(self):
+        """
+        Simple test case with no helper functions
+        """
+        # start_indices: 0, 31
+        # revcomp_start_indices: 0, 21
+        seq_list = [("chr1", "A" * 30), ("chr2", "T" * 20)]
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+        for sba_idx in range(30):
+            assert seq_coll.get_record_name_from_sba_index(sba_idx) == "chr1"
+        for sba_idx in range(31, 50):
+            assert seq_coll.get_record_name_from_sba_index(sba_idx) == "chr2"
+
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="reverse_complement")
+        for sba_idx in range(20):
+            assert seq_coll.get_record_name_from_sba_index(sba_idx) == "chr2"
+        for sba_idx in range(21, 50):
+            assert seq_coll.get_record_name_from_sba_index(sba_idx) == "chr1"
+
+    def test_get_record_from_sba_index_02(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_1, "forward")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_1, "forward", None, self.expected_forward_sba_seq_starts_1
         )
 
-    def test_get_record_num_from_sba_index_02(self):
+    def test_get_record_from_sba_index_03(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_1, "reverse_complement")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_1, "reverse_complement", None, self.expected_revcomp_sba_seq_starts_1
         )
 
-    def test_get_record_num_from_sba_index_03(self):
+    def test_get_record_from_sba_index_04(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_1, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="forward")
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_1, "both", "forward", self.expected_forward_sba_seq_starts_1
         )
 
-    def test_get_record_num_from_sba_index_04(self):
+    def test_get_record_from_sba_index_05(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_1, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="reverse_complement")
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_1, "both", "reverse_complement", self.expected_revcomp_sba_seq_starts_1
         )
 
-    def test_get_record_num_from_sba_index_05(self):
+    def test_get_record_from_sba_index_06(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_2, "forward")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_2, "forward", None, self.expected_forward_sba_seq_starts_2
         )
 
-    def test_get_record_num_from_sba_index_06(self):
+    def test_get_record_from_sba_index_07(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_2, "reverse_complement")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_2, "reverse_complement", None, self.expected_revcomp_sba_seq_starts_2
         )
 
-    def test_get_record_num_from_sba_index_07(self):
+    def test_get_record_from_sba_index_08(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_2, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="forward")
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_2, "both", "forward", self.expected_forward_sba_seq_starts_2
         )
 
-    def test_get_record_num_from_sba_index_08(self):
+    def test_get_record_from_sba_index_09(self):
         """
         Test all valid indices match expected record_num for:
             SequenceCollection(seq_list_2, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="reverse_complement")
         """
-        self._test_get_record_num(
+        self._test_get_record(
             self.seq_list_2, "both", "reverse_complement", self.expected_revcomp_sba_seq_starts_2
         )
 
@@ -600,3 +640,87 @@ class TestGetRecordNum(TestSequenceCollection):
             seq_coll.get_record_num_from_sba_index(-1, sba_strand="forward")
         with pytest.raises(IndexError):
             seq_coll.get_record_num_from_sba_index(37, sba_strand="forward")
+
+
+class TestGetRecordLoc(TestSequenceCollection):
+
+    def test_get_record_loc_from_sba_index_01(self):
+        """
+        Simple test case with no helper functions
+        """
+        # start_indices: 0, 5
+        # revcomp_start_indices: 0, 3
+        # chrom: 1111 22
+        # +      AAAA$GG
+        # -------------
+        # -      CC$TTTT
+        # chrom: 22 1111
+        seq_list = [("chr1", "AAAA"), ("chr2", "GG")]
+
+        expected_forward_record_locs = {
+            0: ("+", "chr1", 0),
+            1: ("+", "chr1", 1),
+            2: ("+", "chr1", 2),
+            3: ("+", "chr1", 3),
+            5: ("+", "chr2", 0),
+            6: ("+", "chr2", 1),
+        }
+
+        expected_one_based_forward_record_locs = {
+            0: ("+", "chr1", 1),
+            1: ("+", "chr1", 2),
+            2: ("+", "chr1", 3),
+            3: ("+", "chr1", 4),
+            5: ("+", "chr2", 1),
+            6: ("+", "chr2", 2),
+        }
+
+        expected_revcomp_record_locs = {
+            0: ("-", "chr2", 1),
+            1: ("-", "chr2", 0),
+            3: ("-", "chr1", 3),
+            4: ("-", "chr1", 2),
+            5: ("-", "chr1", 1),
+            6: ("-", "chr1", 0),
+        }
+
+        expected_one_based_revcomp_record_locs = {
+            0: ("-", "chr2", 2),
+            1: ("-", "chr2", 1),
+            3: ("-", "chr1", 4),
+            4: ("-", "chr1", 3),
+            5: ("-", "chr1", 2),
+            6: ("-", "chr1", 1),
+        }
+
+        # forward, zero-based
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+        for sba_idx, expected_record_loc in expected_forward_record_locs.items():
+            record_loc = seq_coll.get_record_loc_from_sba_index(
+                sba_idx, sba_strand="forward", one_based=False
+            )
+            assert record_loc == expected_record_loc
+
+        # forward, one-based
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+        for sba_idx, expected_record_loc in expected_one_based_forward_record_locs.items():
+            record_loc = seq_coll.get_record_loc_from_sba_index(
+                sba_idx, sba_strand="forward", one_based=True
+            )
+            assert record_loc == expected_record_loc
+
+        # reverse complement, zero-based
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="reverse_complement")
+        for sba_idx, expected_record_loc in expected_revcomp_record_locs.items():
+            record_loc = seq_coll.get_record_loc_from_sba_index(
+                sba_idx, sba_strand="reverse_complement", one_based=False
+            )
+            assert record_loc == expected_record_loc
+
+        # forward, one-based
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="reverse_complement")
+        for sba_idx, expected_record_loc in expected_one_based_revcomp_record_locs.items():
+            record_loc = seq_coll.get_record_loc_from_sba_index(
+                sba_idx, sba_strand="reverse_complement", one_based=True
+            )
+            assert record_loc == expected_record_loc
