@@ -19,6 +19,8 @@ class TestSequenceCollection:
     expected_revcomp_sba_1 = np.array([ord(base) for base in revcomp_seq_1], dtype=np.uint8)
     forward_record_names_1 = ["chr1"]
     revcomp_record_names_1 = ["chr1"]
+    fasta_str_1 = ">chr1\nATCGAATTAG"
+    revcomp_fasta_str_1 = ">chr1\nCTAATTCGAT"
 
     # example sequence_list and expected values (three chromosomes)
     seq_list_2 = [("chr1", "ATCGAATTAG"), ("chr2", "GGATCTTGCATT"), ("chr3", "GTGATTGACCCCT")]
@@ -31,6 +33,8 @@ class TestSequenceCollection:
     expected_revcomp_sba_2 = np.array([ord(base) for base in revcomp_seq_2], dtype=np.uint8)
     forward_record_names_2 = ["chr1", "chr2", "chr3"]
     revcomp_record_names_2 = ["chr3", "chr2", "chr1"]
+    fasta_str_2 = ">chr1\nATCGAATTAG\n>chr2\nGGATCTTGCATT\n>chr3\nGTGATTGACCCCT"
+    revcomp_fasta_str_2 = ">chr1\nCTAATTCGAT\n>chr2\nAATGCAAGATCC\n>chr3\nAGGGGTCAATCAC"
 
     # For testing reverse_complement
     seqs = [
@@ -773,3 +777,95 @@ class TestOtherMemberFunctions(TestSequenceCollection):
 
             seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="both")
             assert len(seq_coll) == i + 1
+
+    def test_strands_loaded(self):
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+        assert seq_coll._strands_loaded == "forward"
+
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
+        )
+        assert seq_coll._strands_loaded == "reverse_complement"
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
+        assert seq_coll._strands_loaded == "both"
+
+    def test_str(self):
+        """
+        Verify that __str__ works as expected for all loaded strand types
+        """
+        # seq_list_1 (single sequence)
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
+        assert str(seq_coll) == self.fasta_str_1
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="both")
+        assert str(seq_coll) == self.fasta_str_1
+
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_1, strands_to_load="reverse_complement"
+        )
+        assert str(seq_coll) == self.revcomp_fasta_str_1
+
+        # seq_list_2 (three sequences)
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+        assert str(seq_coll) == self.fasta_str_2
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
+        assert str(seq_coll) == self.fasta_str_2
+
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
+        )
+        assert str(seq_coll) == self.revcomp_fasta_str_2
+
+    def test_iter_records(self):
+        """
+        Simple of iter_records. iter_records is indirectly tested through test_str as well.
+        """
+        # seq_list_1 (single sequence)
+        # forward
+        expected_records = [("chr1", 0, 9)]
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
+        records = [record for record in seq_coll.iter_records("forward")]
+        assert records == expected_records
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="both")
+        records = [record for record in seq_coll.iter_records("forward")]
+        assert records == expected_records
+
+        # revcomp
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="both")
+        records = [record for record in seq_coll.iter_records("reverse_complement")]
+        assert records == expected_records
+
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_1, strands_to_load="reverse_complement"
+        )
+        records = [record for record in seq_coll.iter_records("reverse_complement")]
+        assert records == expected_records
+
+        # seq_list_2 (three sequences)
+        # forward
+        expected_records = [("chr1", 0, 9), ("chr2", 11, 22), ("chr3", 24, 36)]
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+        records = [record for record in seq_coll.iter_records("forward")]
+        assert records == expected_records
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
+        records = [record for record in seq_coll.iter_records("forward")]
+        assert records == expected_records
+
+        # revcomp
+        expected_records = [("chr1", 27, 36), ("chr2", 14, 25), ("chr3", 0, 12)]
+
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
+        records = [record for record in seq_coll.iter_records("reverse_complement")]
+        assert records == expected_records
+
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
+        )
+        records = [record for record in seq_coll.iter_records("reverse_complement")]
+        assert records == expected_records
