@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from genome_kmers.sequence_collection import SequenceCollection, reverse_complement
+from genome_kmers.sequence_collection import SequenceCollection, reverse_complement_sba
 
 
 class TestSequenceCollection:
@@ -17,7 +17,8 @@ class TestSequenceCollection:
     expected_revcomp_sba_seq_starts_1 = np.array([0], dtype=np.uint32)
     expected_forward_sba_1 = np.array([ord(base) for base in seq_1], dtype=np.uint8)
     expected_revcomp_sba_1 = np.array([ord(base) for base in revcomp_seq_1], dtype=np.uint8)
-    record_names_1 = ["chr1"]
+    forward_record_names_1 = ["chr1"]
+    revcomp_record_names_1 = ["chr1"]
 
     # example sequence_list and expected values (three chromosomes)
     seq_list_2 = [("chr1", "ATCGAATTAG"), ("chr2", "GGATCTTGCATT"), ("chr3", "GTGATTGACCCCT")]
@@ -28,7 +29,8 @@ class TestSequenceCollection:
     expected_revcomp_sba_seq_starts_2 = np.array([0, 14, 27], dtype=np.uint32)
     expected_forward_sba_2 = np.array([ord(base) for base in seq_2], dtype=np.uint8)
     expected_revcomp_sba_2 = np.array([ord(base) for base in revcomp_seq_2], dtype=np.uint8)
-    record_names_2 = ["chr1", "chr2", "chr3"]
+    forward_record_names_2 = ["chr1", "chr2", "chr3"]
+    revcomp_record_names_2 = ["chr3", "chr2", "chr1"]
 
     # For testing reverse_complement
     seqs = [
@@ -77,12 +79,13 @@ class TestInit(TestSequenceCollection):
 
         # check seq start arrays
         assert np.array_equal(
-            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_1
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_1
         )
-        assert seq_coll._revcomp_sba_seq_starts is None
+        assert seq_coll._revcomp_sba_seg_starts is None
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_1
+        assert seq_coll.forward_record_names == self.forward_record_names_1
+        assert seq_coll.revcomp_record_names is None
         assert seq_coll._strands_loaded == "forward"
 
     def test_forward_init_02(self):
@@ -97,12 +100,13 @@ class TestInit(TestSequenceCollection):
 
         # check seq start arrays
         assert np.array_equal(
-            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_2
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_2
         )
-        assert seq_coll._revcomp_sba_seq_starts is None
+        assert seq_coll._revcomp_sba_seg_starts is None
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_2
+        assert seq_coll.forward_record_names == self.forward_record_names_2
+        assert seq_coll.revcomp_record_names is None
         assert seq_coll._strands_loaded == "forward"
 
     def test_revcomp_init_01(self):
@@ -118,13 +122,14 @@ class TestInit(TestSequenceCollection):
         assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_1)
 
         # check seq start arrays
-        assert seq_coll._forward_sba_seq_starts is None
+        assert seq_coll._forward_sba_seg_starts is None
         assert np.array_equal(
-            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_1
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_1
         )
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_1
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_1
+        assert seq_coll.forward_record_names is None
         assert seq_coll._strands_loaded == "reverse_complement"
 
     def test_revcomp_init_02(self):
@@ -140,13 +145,14 @@ class TestInit(TestSequenceCollection):
         assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_2)
 
         # check seq start arrays
-        assert seq_coll._forward_sba_seq_starts is None
+        assert seq_coll._forward_sba_seg_starts is None
         assert np.array_equal(
-            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_2
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_2
         )
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_2
+        assert seq_coll.forward_record_names is None
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_2
         assert seq_coll._strands_loaded == "reverse_complement"
 
     def test_both_init_01(self):
@@ -161,14 +167,15 @@ class TestInit(TestSequenceCollection):
 
         # check seq start arrays
         assert np.array_equal(
-            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_1
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_1
         )
         assert np.array_equal(
-            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_1
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_1
         )
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_1
+        assert seq_coll.forward_record_names == self.forward_record_names_1
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_1
         assert seq_coll._strands_loaded == "both"
 
     def test_both_init_02(self):
@@ -183,14 +190,15 @@ class TestInit(TestSequenceCollection):
 
         # check seq start arrays
         assert np.array_equal(
-            seq_coll._forward_sba_seq_starts, self.expected_forward_sba_seq_starts_2
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_2
         )
         assert np.array_equal(
-            seq_coll._revcomp_sba_seq_starts, self.expected_revcomp_sba_seq_starts_2
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_2
         )
 
         # check other values that should be set
-        assert seq_coll.record_names == self.record_names_2
+        assert seq_coll.forward_record_names == self.forward_record_names_2
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_2
         assert seq_coll._strands_loaded == "both"
 
     def test_init_error_01(self):
@@ -357,15 +365,15 @@ class TestReverseComplement(TestSequenceCollection):
     Test reverse complement methods
     """
 
-    def test_reverse_complement_func_not_inplace(self):
+    def test_reverse_complement_array_not_inplace(self):
         """
-        Test that the global reverse_complement function works as intended for inplace=False.
+        Test that the global reverse_complement_array function works as intended for inplace=False.
         """
         for seq, expected_rc_seq in zip(self.seqs, self.expected_rc_seqs):
             expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
             sba = np.array([ord(base) for base in seq], dtype=np.uint8)
             complement_arr = SequenceCollection._get_complement_mapping_array()
-            rc_sba = reverse_complement(sba, complement_arr, inplace=False)
+            rc_sba = reverse_complement_sba(sba, complement_arr, inplace=False)
 
             # verify that rc_sba matches sba
             assert rc_sba.dtype == np.uint8
@@ -380,15 +388,15 @@ class TestReverseComplement(TestSequenceCollection):
                 if sba[0] == rc_sba[0]:
                     raise AssertionError("Changing a value in sba also changes the value in rc_sba")
 
-    def test_reverse_complement_func_inplace(self):
+    def test_reverse_complement_array_inplace(self):
         """
-        Test that the global reverse_complement function works as intended for inplace=False.
+        Test that the global reverse_complement_array function works as intended for inplace=False.
         """
         for seq, expected_rc_seq in zip(self.seqs, self.expected_rc_seqs):
             expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
             sba = np.array([ord(base) for base in seq], dtype=np.uint8)
             complement_arr = SequenceCollection._get_complement_mapping_array()
-            rc_sba = reverse_complement(sba, complement_arr, inplace=True)
+            rc_sba = reverse_complement_sba(sba, complement_arr, inplace=True)
 
             # verify that rc_sba matches sba
             assert rc_sba.dtype == np.uint8
@@ -415,6 +423,9 @@ class TestReverseComplement(TestSequenceCollection):
             # build expected sba for initial load and for after the reverse complement
             expected_sba = np.array([ord(base) for base in seq], dtype=np.uint8)
             expected_rc_sba = np.array([ord(base) for base in expected_rc_seq], dtype=np.uint8)
+            expected_forward_record_names = [record_name for record_name, _ in seq_list]
+            expected_revcomp_record_names = expected_forward_record_names.copy()
+            expected_revcomp_record_names.reverse()
 
             # initialize a sequence collection on seq_list
             seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
@@ -422,18 +433,22 @@ class TestReverseComplement(TestSequenceCollection):
             # check that everything matches what is expected before reverse complement
             assert seq_coll._strands_loaded == "forward"
             assert np.array_equal(seq_coll.forward_sba, expected_sba)
-            assert seq_coll._forward_sba_seq_starts is not None
+            assert seq_coll._forward_sba_seg_starts is not None
             assert seq_coll.revcomp_sba is None
-            assert seq_coll._revcomp_sba_seq_starts is None
+            assert seq_coll._revcomp_sba_seg_starts is None
+            assert seq_coll.forward_record_names == expected_forward_record_names
+            assert seq_coll.revcomp_record_names is None
 
             seq_coll.reverse_complement()
 
             # check that everything matches what is expected after reverse complement
             assert seq_coll._strands_loaded == "reverse_complement"
             assert seq_coll.forward_sba is None
-            assert seq_coll._forward_sba_seq_starts is None
+            assert seq_coll._forward_sba_seg_starts is None
             assert np.array_equal(seq_coll.revcomp_sba, expected_rc_sba)
-            assert seq_coll._revcomp_sba_seq_starts is not None
+            assert seq_coll._revcomp_sba_seg_starts is not None
+            assert seq_coll.forward_record_names is None
+            assert seq_coll.revcomp_record_names == expected_revcomp_record_names
 
     def test_reverse_complement_error(self):
         """
@@ -450,19 +465,13 @@ class TestGetRecord(TestSequenceCollection):
     """
 
     @staticmethod
-    def get_expected_record_num(sba_start_indices, sba_idx, sba_strand):
+    def get_expected_segment_num(sba_start_indices, sba_idx, sba_strand):
         for i in range(len(sba_start_indices)):
             lower_bound = sba_start_indices[i]
             upper_bound = sba_start_indices[i + 1] if i != len(sba_start_indices) - 1 else 9e99
             if lower_bound <= sba_idx < upper_bound:
-                if sba_strand == "forward":
-                    return i
-                elif sba_strand == "reverse_complement":
-                    # if it is the reverse_complement strand, need to account for the fact that
-                    # it will give the nth from the left sequence record, but the sequences have
-                    # been reversed
-                    return len(sba_start_indices) - 1 - i
-        raise AssertionError(f"Could not get expected record num.  Logic error in helper function.")
+                return i
+        raise AssertionError("Could not get expected record num.  Logic error in helper function.")
 
     @staticmethod
     def _test_get_record(seq_list, strands_to_load, sba_strand, expected_sba_seq_starts):
@@ -486,16 +495,20 @@ class TestGetRecord(TestSequenceCollection):
         seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load=strands_to_load)
         for sba_idx in range(sba_len):
             # check record_num matches what is expected
-            record_num = seq_coll.get_record_num_from_sba_index(sba_idx, sba_strand=sba_strand)
+            segment_num = seq_coll.get_segment_num_from_sba_index(sba_idx, sba_strand=sba_strand)
             actual_sba_strand = sba_strand if sba_strand is not None else strands_to_load
-            expected_record_num = TestGetRecord.get_expected_record_num(
+            expected_segment_num = TestGetRecord.get_expected_segment_num(
                 expected_sba_seq_starts, sba_idx, actual_sba_strand
             )
-            assert record_num == expected_record_num
+            assert segment_num == expected_segment_num
 
             # check record_name matches was is expected
             record_name = seq_coll.get_record_name_from_sba_index(sba_idx, sba_strand)
-            expected_record_name = seq_list[record_num][0]
+            if actual_sba_strand == "forward":
+                expected_record_name = seq_list[segment_num][0]
+            else:
+                n = len(seq_list) - 1 - segment_num
+                expected_record_name = seq_list[n][0]
             assert record_name == expected_record_name
 
     def test_get_record_from_sba_index_01(self):
@@ -603,7 +616,7 @@ class TestGetRecord(TestSequenceCollection):
         """
         seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="both")
         with pytest.raises(ValueError):
-            seq_coll.get_record_num_from_sba_index(0)
+            seq_coll.get_segment_num_from_sba_index(0)
 
     def test_get_record_num_from_sba_index_error_02(self):
         """
@@ -611,7 +624,7 @@ class TestGetRecord(TestSequenceCollection):
         """
         seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
         with pytest.raises(ValueError):
-            seq_coll.get_record_num_from_sba_index(0, sba_strand="reverse_complement")
+            seq_coll.get_segment_num_from_sba_index(0, sba_strand="reverse_complement")
 
     def test_get_record_num_from_sba_index_error_03(self):
         """
@@ -621,7 +634,7 @@ class TestGetRecord(TestSequenceCollection):
             sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
         )
         with pytest.raises(ValueError):
-            seq_coll.get_record_num_from_sba_index(0, sba_strand="forward")
+            seq_coll.get_segment_num_from_sba_index(0, sba_strand="forward")
 
     def test_get_record_num_from_sba_index_error_04(self):
         """
@@ -629,7 +642,7 @@ class TestGetRecord(TestSequenceCollection):
         """
         seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
         with pytest.raises(ValueError):
-            seq_coll.get_record_num_from_sba_index(0, sba_strand="unknown_value")
+            seq_coll.get_segment_num_from_sba_index(0, sba_strand="unknown_value")
 
     def test_get_record_num_from_sba_index_error_05(self):
         """
@@ -637,9 +650,9 @@ class TestGetRecord(TestSequenceCollection):
         """
         seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
         with pytest.raises(IndexError):
-            seq_coll.get_record_num_from_sba_index(-1, sba_strand="forward")
+            seq_coll.get_segment_num_from_sba_index(-1, sba_strand="forward")
         with pytest.raises(IndexError):
-            seq_coll.get_record_num_from_sba_index(37, sba_strand="forward")
+            seq_coll.get_segment_num_from_sba_index(37, sba_strand="forward")
 
 
 class TestGetRecordLoc(TestSequenceCollection):
@@ -724,3 +737,39 @@ class TestGetRecordLoc(TestSequenceCollection):
                 sba_idx, sba_strand="reverse_complement", one_based=True
             )
             assert record_loc == expected_record_loc
+
+
+class TestOtherMemberFunctions(TestSequenceCollection):
+    """
+    Test other member functions that don't fit into a nice category
+    """
+
+    @staticmethod
+    def get_random_seq(seq_len):
+        bases = ["A", "T", "G", "C"]
+        seq = "".join(np.random.choice(np.array(bases, dtype="U1"), seq_len, replace=True))
+        return seq
+
+    def test_len(self):
+        """ """
+        np.random.seed(42)
+        seq_list = []
+        for i in range(5):
+            chrom = f"chr{i}"
+            seq = self.get_random_seq(10)
+            seq_list.append((chrom, seq))
+
+            seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+            assert len(seq_coll) == i + 1
+            seq_coll.reverse_complement()
+            assert len(seq_coll) == i + 1
+
+            seq_coll = SequenceCollection(
+                sequence_list=seq_list, strands_to_load="reverse_complement"
+            )
+            assert len(seq_coll) == i + 1
+            seq_coll.reverse_complement()
+            assert len(seq_coll) == i + 1
+
+            seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="both")
+            assert len(seq_coll) == i + 1

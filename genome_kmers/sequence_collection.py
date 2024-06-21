@@ -10,7 +10,9 @@ from numba.typed import Dict
 
 
 @jit
-def reverse_complement(sba: np.array, complement_mapping_arr: np.array, inplace=False) -> np.array:
+def reverse_complement_sba(
+    sba: np.array, complement_mapping_arr: np.array, inplace=False
+) -> np.array:
     """
     Reverse complement sequence byte array (sba) using the uint8 to uint8 mapping array
     (complement_mapping_arr).  This function uses numba.jit for performance.
@@ -44,7 +46,60 @@ def reverse_complement(sba: np.array, complement_mapping_arr: np.array, inplace=
 class SequenceCollection:
     """
     Holds all the information contained within a fasta file in a format conducive to
-    kmer sorting.  Each header and its corresponding sequence is called a record.
+    kmer sorting.
+
+    Terminology
+    -----------
+    sba: sequence byte array
+    revcomp: reverse complement
+    record: each header and its corresponding sequence is called a record.  record_num is based on
+        the order that records are read in.  record_num does **not** change when reverse
+        complemented
+    segement: is the same as a record except that segment_num always starts leftmost.  i.e. the
+        sba end index for segment N is always less than the sba end index for segment M > N
+    forward_sba_idx: index in forward sequence byte array
+    revcomp_sba_idx: index in reverse complement sequence byte array
+    forward_seq_idx: 0-based index for a sequence on the forward strand
+    revcomp_seq_idx: 0-based index for a sequence on the reverse complement strand
+
+    Forward strand
+    --------------
+    record_num                   0           1                  2
+    segment_num                  0           1                  2
+    forward_record_name          A           B                  C
+    forward_sba              [-------]$[------------]$[--------------------]
+                             |       | |            | |                    |
+    forward_sba_seg_starts   0       | 10           | 25                   |
+    forward_sba_seg_ends             8              23                     46
+
+
+    Reverse complement strand
+    -------------------------
+    revcomp_sba_seg_ends                          21             36        46
+    revcomp_sba_seg_starts   0                    | 23           | 38      |
+                             |                    | |            | |       |
+    revcomp_sba              [====================]$[============]$[=======]
+    revcomp_record_name                C                   B           A
+    segment_num                        0                   1           2
+    record_num                         2                   1           0
+
+
+    Notes
+    -----
+    - a "$" is placed between each sequence so that you can determine if you've reached the end of
+        a sequence without referencing the seg_starts / seg_ends array.
+    - the collection must contain at least one sequence
+    - all sequences in the collection must have a length > 0
+    - duplicate record_names are not allowed
+
+    Members
+    -------
+    forward_sba (np.array): forward sba (dtype=uint8)
+    _forward_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
+        segment on the forward strand. (dtype=uint32)
+    revcomp_sba (np.array): reverse complement sba (dtype=uint8)
+    _revcomp_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
+        segment on the reverse complement strand. (dtype=uint32)
     """
 
     def __init__(
@@ -116,9 +171,14 @@ class SequenceCollection:
 
     def __len__(self):
         """
-        Equivalent to self.sequence_length()
+        Count of sequence records in the collection
         """
-        pass
+        if self._strands_loaded == "forward" or self._strands_loaded == "both":
+            return len(self._forward_sba_seg_starts)
+        elif self._strands_loaded == "reverse_complement":
+            return len(self._revcomp_sba_seg_starts)
+        else:
+            raise AssertionError(f"strands_loaded ({self._strands_loaded}) not recognized")
 
     def __str__(self):
         pass
@@ -136,8 +196,8 @@ class SequenceCollection:
         """
         pass
 
-    def record_names(self):
-        pass
+    # def record_names(self):
+    #     pass
 
     def record_count(self):
         """
@@ -317,6 +377,7 @@ class SequenceCollection:
     @staticmethod
     def _get_record_names_from_sequence_list(sequence_list: list[tuple[str, str]]) -> List[str]:
         """
+        Get the list of record names from sequence_list.  Verify that there are no duplicates.
 
         Args:
             sequence_list (list[tuple[str, str]]): List of (seq_id, seq)
@@ -358,37 +419,45 @@ class SequenceCollection:
             raise ValueError(f"strands_to_load not recognized ({strands_to_load})")
 
         self.forward_sba = None
-        self._forward_sba_seq_starts = None
+        self._forward_sba_seg_starts = None
         self.revcomp_sba = None
-        self._revcomp_sba_seq_starts = None
+        self._revcomp_sba_seg_starts = None
+        self.forward_record_names = None
+        self.revcomp_record_names = None
 
         if strands_to_load == "forward" or strands_to_load == "both":
             self.forward_sba = self._get_sba_from_sequence_list(sequence_list)
-            self._forward_sba_seq_starts = self._get_sba_starts_from_sequence_list(sequence_list)
+            self._forward_sba_seg_starts = self._get_sba_starts_from_sequence_list(sequence_list)
+            self.forward_record_names = self._get_record_names_from_sequence_list(sequence_list)
 
         if strands_to_load == "both":
-            # take advantage of having forward_sba and _forward_sba_seq_starts already loaded
+            # take advantage of having forward_sba and _forward_sba_seg_starts already loaded
             # into memory.  We need only copy the array and reverse_complement.
             self.revcomp_sba = np.copy(self.forward_sba)
-            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
+            reverse_complement_sba(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
-                self._forward_sba_seq_starts,
+            self._revcomp_sba_seg_starts = self._get_opposite_strand_sba_start_indices(
+                self._forward_sba_seg_starts,
                 len(self.revcomp_sba),
             )
+
+            self.revcomp_record_names = self.forward_record_names.copy()
+            self.revcomp_record_names.reverse()
 
         elif strands_to_load == "reverse_complement":
             # load forward strand information and then reverse complement in place
             self.revcomp_sba = self._get_sba_from_sequence_list(sequence_list)
-            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
+            reverse_complement_sba(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
 
-            self._revcomp_sba_seq_starts = self._get_sba_starts_from_sequence_list(sequence_list)
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
-                self._revcomp_sba_seq_starts,
+            self._revcomp_sba_seg_starts = self._get_sba_starts_from_sequence_list(sequence_list)
+            self._revcomp_sba_seg_starts = self._get_opposite_strand_sba_start_indices(
+                self._revcomp_sba_seg_starts,
                 len(self.revcomp_sba),
             )
 
-        self.record_names = self._get_record_names_from_sequence_list(sequence_list)
+            self.revcomp_record_names = self._get_record_names_from_sequence_list(sequence_list)
+            self.revcomp_record_names.reverse()
+
         self._strands_loaded = strands_to_load
 
         return
@@ -401,26 +470,45 @@ class SequenceCollection:
             raise ValueError(f"self._strands_loaded ({self._strands_loaded}) cannot be 'both'")
 
         if self._strands_loaded == "forward":
+            # sba
             self.revcomp_sba = self.forward_sba
             self.forward_sba = None
-            reverse_complement(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
-            self._revcomp_sba_seq_starts = self._forward_sba_seq_starts
-            self._forward_sba_seq_starts = None
-            self._revcomp_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
-                self._revcomp_sba_seq_starts,
+            reverse_complement_sba(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
+
+            # sba segment starts
+            self._revcomp_sba_seg_starts = self._forward_sba_seg_starts
+            self._forward_sba_seg_starts = None
+            self._revcomp_sba_seg_starts = self._get_opposite_strand_sba_start_indices(
+                self._revcomp_sba_seg_starts,
                 len(self.revcomp_sba),
             )
+
+            # record names
+            self.revcomp_record_names = self.forward_record_names
+            self.revcomp_record_names.reverse()
+            self.forward_record_names = None
+
             self._strands_loaded = "reverse_complement"
+
         elif self._strands_loaded == "reverse_complement":
+            # sba
             self.forward_sba = self.revcomp_sba
             self.revcomp_sba = None
-            reverse_complement(self.forward_sba, self._complement_mapping_arr, inplace=True)
-            self._forward_sba_seq_starts = self._revcomp_sba_seq_starts
-            self._revcomp_sba_seq_starts = None
-            self._forward_sba_seq_starts = self._get_opposite_strand_sba_start_indices(
-                self._forward_sba_seq_starts,
-                len(self.revcomp_sba),
+            reverse_complement_sba(self.forward_sba, self._complement_mapping_arr, inplace=True)
+
+            # sba segment starts
+            self._forward_sba_seg_starts = self._revcomp_sba_seg_starts
+            self._revcomp_sba_seg_starts = None
+            self._forward_sba_seg_starts = self._get_opposite_strand_sba_start_indices(
+                self._forward_sba_seg_starts,
+                len(self.forward_sba),
             )
+
+            # record names
+            self.forward_record_names = self.revcomp_record_names
+            self.forward_record_names.reverse()
+            self.revcomp_record_names = None
+
             self._strands_loaded = "forward"
 
         return
@@ -484,30 +572,35 @@ class SequenceCollection:
         return opposite_strand_start_indices
 
     def _get_forward_seq_idx_from_sba_idx(
-        self, sba_idx: int, record_num: int = None, sba_strand: str = None, one_based: bool = False
+        self,
+        sba_idx: int,
+        segment_num: int = None,
+        sba_strand: str = None,
+        one_based: bool = False,
     ) -> int:
         # decide which strand to used based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
         # if it hasn't been defined
-        if record_num is None:
-            record_num = self.get_record_num_from_sba_index(sba_idx, sba_strand)
+        if segment_num is None:
+            segment_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
 
         if sba_strand == "forward":
-            seq_idx = sba_idx - self._forward_sba_seq_starts[record_num]
-        else:
-            # NOTE: for "reverse_complement" record_num == 0 is rightmost
-            segment_idx = len(self._revcomp_sba_seq_starts) - 1 - record_num
-            if segment_idx == len(self._revcomp_sba_seq_starts) - 1:
-                sba_record_end_idx = len(self.revcomp_sba) - 1
+            seq_idx = sba_idx - self._forward_sba_seg_starts[segment_num]
+        elif sba_strand == "reverse_complement":
+            # TODO: refactor this into a function that gives end_index for segment_num
+            if segment_num == len(self) - 1:
+                sba_segment_end_idx = len(self.revcomp_sba) - 1
             else:
-                sba_record_end_idx = self._revcomp_sba_seq_starts[segment_idx + 1] - 2
-            seq_idx = sba_record_end_idx - sba_idx
+                sba_segment_end_idx = self._revcomp_sba_seg_starts[segment_num + 1] - 2
+            seq_idx = sba_segment_end_idx - sba_idx
+        else:
+            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
 
         if one_based:
-            return seq_idx + 1
-        else:
-            return seq_idx
+            seq_idx += 1
+
+        return seq_idx
 
     def get_record_loc_from_sba_index(
         self, sba_idx: int, sba_strand: str = None, one_based: bool = False
@@ -519,9 +612,18 @@ class SequenceCollection:
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
         # get all loc info
-        record_num = self.get_record_num_from_sba_index(sba_idx, sba_strand)
-        record_name = self.record_names[record_num]
-        seq_idx = self._get_forward_seq_idx_from_sba_idx(sba_idx, record_num, sba_strand, one_based)
+        segement_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
+
+        if sba_strand == "forward":
+            record_name = self.forward_record_names[segement_num]
+        elif sba_strand == "reverse_complement":
+            record_name = self.revcomp_record_names[segement_num]
+        else:
+            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
+
+        seq_idx = self._get_forward_seq_idx_from_sba_idx(
+            sba_idx, segement_num, sba_strand, one_based
+        )
         strand = "+" if sba_strand == "forward" else "-"
 
         return (strand, record_name, seq_idx)
@@ -541,26 +643,33 @@ class SequenceCollection:
         Returns:
             record_name (str):
         """
-        record_num = self.get_record_num_from_sba_index(sba_idx, sba_strand)
-        record_name = self.record_names[record_num]
+        # decide which strand to used based on user parameter
+        sba_strand = self._get_sba_strand_to_use(sba_strand)
+
+        segement_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
+        if sba_strand == "forward":
+            record_name = self.forward_record_names[segement_num]
+        elif sba_strand == "reverse_complement":
+            record_name = self.revcomp_record_names[segement_num]
+        else:
+            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
+
         return record_name
 
     @staticmethod
-    def _get_record_num_from_sba_index(
-        sba_seq_starts: np.array, sba_idx: int, sba_is_forward: bool = True
-    ) -> int:
+    def _get_segment_num_from_sba_index(sba_seg_starts: np.array, sba_idx: int) -> int:
         """
-        Get the sequence record number from the sequence byte array index.
+        Get the segment number from the sequence byte array index.
 
         NOTE: no checking of argument values is done in this function.  If checking is required, it
         should be done through the wrapper function get_record_num_from_sba_idx.
 
         Args:
-            sba_seq_starts (np.array): sequence byte array start indices dtype=np.unit32
+            sba_seg_starts (np.array): sba indices for each segements start (dtype=np.unit32)
             sba_idx (int): sequence byte array index
 
         Returns:
-            record_num (int):
+            segement_num (int):
         """
         # TODO: if this is too slow in profiling, an alternative implementation is to generate a
         # look-up table that takes O(1) average look-up time if the distribution of sequence lengths
@@ -569,14 +678,8 @@ class SequenceCollection:
         # Will have bad memory usage in worst case (e.g. 1 length 1e7, 1e7 of length 1)
 
         # use Python's bisect function to do O(log(N)) search for the correct record number using
-        # _forward_sba_seq_starts or _revcomp_sba_seq_starts
-        n = bisect_right(sba_seq_starts, sba_idx) - 1
-        if sba_is_forward:
-            return n
-        else:
-            # if it is reverse_complement strand, need to account for the fact that n will give
-            # the nth from the left sequence record, but the sequences have been reversed
-            return len(sba_seq_starts) - 1 - n
+        # _forward_sba_seg_starts or _revcomp_sba_seg_starts
+        return bisect_right(sba_seg_starts, sba_idx) - 1
 
     def _get_sba_strand_to_use(self, sba_strand: str) -> str:
         # sba_strand only needs to be specified for self._strands_loaded == "both".  If provided
@@ -600,9 +703,9 @@ class SequenceCollection:
         sba_strand_to_use = self._strands_loaded if self._strands_loaded != "both" else sba_strand
         return sba_strand_to_use
 
-    def get_record_num_from_sba_index(self, sba_idx: int, sba_strand: str = None) -> int:
+    def get_segment_num_from_sba_index(self, sba_idx: int, sba_strand: str = None) -> int:
         """
-        Get the sequence record number from the sequence byte array index defined on sba_strand
+        Get the segment number from the sequence byte array index defined on sba_strand
         (attempt to automatically detect the strand if not specified)
 
         Args:
@@ -614,23 +717,23 @@ class SequenceCollection:
                 detect the strand that was loaded.  Defaults to None.
 
         Returns:
-            record_num (int):
+            segment_num (int):
         """
         # decide which strand to used based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
-        # get the record number
+        # get the segement number
         if sba_strand == "forward":
             if sba_idx < 0 or sba_idx >= len(self.forward_sba):
                 raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
-            record_num = SequenceCollection._get_record_num_from_sba_index(
-                self._forward_sba_seq_starts, sba_idx, True
+            segment_num = SequenceCollection._get_segment_num_from_sba_index(
+                self._forward_sba_seg_starts, sba_idx
             )
         elif sba_strand == "reverse_complement":
             if sba_idx < 0 or sba_idx >= len(self.revcomp_sba):
                 raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
-            record_num = SequenceCollection._get_record_num_from_sba_index(
-                self._revcomp_sba_seq_starts, sba_idx, False
+            segment_num = SequenceCollection._get_segment_num_from_sba_index(
+                self._revcomp_sba_seg_starts, sba_idx
             )
 
-        return record_num
+        return segment_num
