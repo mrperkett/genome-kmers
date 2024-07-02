@@ -163,7 +163,8 @@ class SequenceCollection:
 
         # load sequence
         if fasta_file_path is not None:
-            self._initialize_from_fasta()
+            self._fasta_file_path = fasta_file_path
+            self._initialize_from_fasta(fasta_file_path, strands_to_load)
         else:
             self._initialize_from_sequence_list(sequence_list, strands_to_load)
 
@@ -328,8 +329,163 @@ class SequenceCollection:
 
         return
 
-    def _initialize_from_fasta(self, fasta_file_path):
-        pass
+    @staticmethod
+    def _get_fasta_stats(fasta_file_path: Path) -> tuple[int, int]:
+        """
+        Read fasta file to determine number of records and total sequence length.
+
+        Args:
+            fasta_file_path (Path): fasta file
+
+        Returns:
+            tuple[int, int]: num_records, total_seq_len
+        """
+        num_records = 0
+        total_seq_len = 0
+        with open(fasta_file_path, "r") as input_file:
+            for line in input_file:
+                if line.startswith(">"):
+                    num_records += 1
+                else:
+                    total_seq_len += len(line.strip())
+        return num_records, total_seq_len
+
+    @staticmethod
+    def _get_fasta_record_name(line: str) -> str:
+        """
+        Get the fasta record name from a line starting with ">".  Use the same method as Bowtie,
+        which reads all characters following ">" until the end of the line or whitespace.
+
+        Args:
+            line (str): fasta file line
+
+        Raises:
+            ValueError: if line does not start with ">"
+
+        Returns:
+            str: record_name
+        """
+        if not line.startswith(">"):
+            raise ValueError("line does not start with '>'")
+        record_name = line[1:].strip().split()[0]
+        return record_name
+
+    def _load_forward_sba_from_fasta(
+        self, fasta_file_path: Path, num_records: int, total_seq_len: int
+    ) -> tuple[np.array, np.array]:
+        """
+        Load forward sequence byte array from fasta file.
+
+        Args:
+            fasta_file_path (Path): fasta file to read
+            num_records (int): number of records in the file
+            total_seq_len (int): total length of all sequences contained in the fasta file
+
+        Returns:
+            tuple[np.array, np.array]: _description_
+        """
+        sba_len = total_seq_len + num_records - 1
+        sba_seg_starts = np.zeros(num_records, dtype=np.uint32)
+        sba = np.zeros(sba_len, dtype=np.uint8)
+        record_names = []
+        first_empty_idx = 0
+        record_num = -1
+        with open(fasta_file_path, "r") as input_file:
+            for line in input_file:
+                if line.startswith(">"):
+                    record_num += 1
+
+                    # if there is previous sequence, need to add a "$" to sba
+                    if first_empty_idx != 0:
+                        sba[first_empty_idx] = ord("$")
+                        first_empty_idx += 1
+
+                    # set the segment start index
+                    sba_seg_starts[record_num] = first_empty_idx
+
+                    # collect the record_name
+                    record_name = SequenceCollection._get_fasta_record_name(line)
+                    record_names.append(record_name)
+                else:
+                    sba_chunk = bytearray(line.strip(), "utf-8")
+                    sba[first_empty_idx : first_empty_idx + len(sba_chunk)] = sba_chunk
+                    first_empty_idx += len(sba_chunk)
+
+        if first_empty_idx != sba_len:
+            raise AssertionError("After parsing the fasta file, we expect sba to be full")
+
+        # check for any sequences with length zero
+        empty_seq_found = (np.diff(sba_seg_starts) < 2).any()
+        if empty_seq_found:
+            raise ValueError(
+                f"At least one empty sequence was found in the input file ({fasta_file_path})"
+            )
+
+        SequenceCollection._verify_record_names_are_unique(record_names)
+
+        # verify that there are no unrecognized values in the sba
+        values_in_sba = set(np.unique(sba))
+        values_not_allowed = values_in_sba - self._allowed_uint8
+        if values_not_allowed != set():
+            raise ValueError(f"Sequence contains non-allowed characters! ({values_not_allowed})")
+
+        return sba, sba_seg_starts, record_names
+
+    def _initialize_from_fasta(self, fasta_file_path: Path, strands_to_load: str) -> None:
+        """
+        Initialize from SequenceCollection object from a fasta file.
+
+        Args:
+            fasta_file_path (Path): fasta file
+            strands_to_load (str): which strand(s) to load into sequence byte arrays ("forward",
+            "reverse_complement", or "both")
+
+        Raises:
+            ValueError: if strand is not recognized
+        """
+        if strands_to_load not in ("forward", "reverse_complement", "both"):
+            raise ValueError(f"strands_to_load not recognized ({strands_to_load})")
+
+        self.forward_sba = None
+        self._forward_sba_seg_starts = None
+        self.revcomp_sba = None
+        self._revcomp_sba_seg_starts = None
+        self.forward_record_names = None
+        self.revcomp_record_names = None
+
+        # determine the full size of the fasta file
+        num_records, total_seq_len = self._get_fasta_stats(fasta_file_path)
+
+        if strands_to_load == "forward" or strands_to_load == "both":
+            self.forward_sba, self._forward_sba_seg_starts, self.forward_record_names = (
+                self._load_forward_sba_from_fasta(fasta_file_path, num_records, total_seq_len)
+            )
+
+        if strands_to_load == "both":
+            # take advantage of having forward_sba and _forward_sba_seg_starts already loaded
+            # into memory.  We need only copy the array and reverse_complement.
+            self.revcomp_sba = np.copy(self.forward_sba)
+            reverse_complement_sba(self.revcomp_sba, self._complement_mapping_arr, inplace=True)
+
+            self._revcomp_sba_seg_starts = self._get_opposite_strand_sba_start_indices(
+                self._forward_sba_seg_starts,
+                len(self.revcomp_sba),
+            )
+
+            self.revcomp_record_names = self.forward_record_names.copy()
+            self.revcomp_record_names.reverse()
+
+        elif strands_to_load == "reverse_complement":
+            # load forward strand information and then reverse complement in place
+            self.forward_sba, self._forward_sba_seg_starts, self.forward_record_names = (
+                self._load_forward_sba_from_fasta(fasta_file_path, num_records, total_seq_len)
+            )
+            self._strands_loaded = "forward"
+            self.reverse_complement()
+
+        self._strands_loaded = strands_to_load
+
+        return
 
     @staticmethod
     def _get_required_sba_length_from_sequence_list(sequence_list: list[tuple[str, str]]) -> int:
@@ -426,6 +582,19 @@ class SequenceCollection:
         return sba_seq_starts
 
     @staticmethod
+    def _verify_record_names_are_unique(record_names):
+        # verify that there are no repeated record names that would lead to ambiguity
+        record_names_counter = Counter(record_names)
+        if len(record_names) != len(record_names_counter):
+            num_record_names_repeated = len(
+                [1 for count in record_names_counter.values() if count > 1]
+            )
+            raise ValueError(
+                f"sequence_list contains {num_record_names_repeated} repeated record_names"
+            )
+        return
+
+    @staticmethod
     def _get_record_names_from_sequence_list(sequence_list: list[tuple[str, str]]) -> List[str]:
         """
         Get the list of record names from sequence_list.  Verify that there are no duplicates.
@@ -440,15 +609,7 @@ class SequenceCollection:
         Returns:
         """
         record_names = [record_name for record_name, _ in sequence_list]
-        # verify that there are no repeated record names that would lead to ambiguity
-        record_names_counter = Counter(record_names)
-        if len(record_names) != len(record_names_counter):
-            num_record_names_repeated = len(
-                [1 for count in record_names_counter.values() if count > 1]
-            )
-            raise ValueError(
-                f"sequence_list contains {num_record_names_repeated} repeated record_names"
-            )
+        SequenceCollection._verify_record_names_are_unique(record_names)
         return record_names
 
     def _initialize_from_sequence_list(

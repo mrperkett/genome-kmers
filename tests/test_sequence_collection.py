@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -66,9 +68,43 @@ class TestSequenceCollection:
     ]
 
 
-class TestInit(TestSequenceCollection):
+class TestInitErrors(TestSequenceCollection):
     """
-    Test SequenceCollection initialization
+    Test SequenceCollection initialization errors that are independent of type of initialization
+    (e.g. fasta_file_path or seq_list)
+    """
+
+    def test_init_error_01(self):
+        """
+        Test that you get a ValueError when attempting to initialize with both fasta_file_path and
+        sequence_list
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(
+                fasta_file_path="path_to_file.fasta",
+                sequence_list=self.seq_list_1,
+                strands_to_load="forward",
+            )
+
+    def test_init_error_02(self):
+        """
+        Test that you get a ValueError when attempting to initialize with neither fasta_file_path
+        nor sequence_list provided
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(strands_to_load="forward")
+
+    def test_init_error_03(self):
+        """
+        Test that you get a ValueError if an unrecognized strands_to_load is passed
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="something_incorrect")
+
+
+class TestSeqListInit(TestSequenceCollection):
+    """
+    Test SequenceCollection seq_list initialization
     """
 
     def test_forward_init_01(self):
@@ -207,40 +243,13 @@ class TestInit(TestSequenceCollection):
 
     def test_init_error_01(self):
         """
-        Test that you get a ValueError when attempting to initialize with both fasta_file_path and
-        sequence_list
-        """
-        with pytest.raises(ValueError):
-            SequenceCollection(
-                fasta_file_path="path_to_file.fasta",
-                sequence_list=self.seq_list_1,
-                strands_to_load="forward",
-            )
-
-    def test_init_error_02(self):
-        """
-        Test that you get a ValueError when attempting to initialize with neither fasta_file_path
-        nor sequence_list provided
-        """
-        with pytest.raises(ValueError):
-            SequenceCollection(strands_to_load="forward")
-
-    def test_init_error_03(self):
-        """
-        Test that you get a ValueError if an unrecognized strands_to_load is passed
-        """
-        with pytest.raises(ValueError):
-            SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="something_incorrect")
-
-    def test_init_error_04(self):
-        """
         Non-allowed base
         """
         seq_list = [("chr1", "ATCGAATTA.")]
         with pytest.raises(ValueError):
             SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
 
-    def test_init_error_05(self):
+    def test_init_error_02(self):
         """
         Empty sequence
         """
@@ -252,7 +261,7 @@ class TestInit(TestSequenceCollection):
         with pytest.raises(ValueError):
             SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
 
-    def test_init_error_06(self):
+    def test_init_error_03(self):
         """
         Repeated sequence record name
         """
@@ -284,6 +293,210 @@ class TestInit(TestSequenceCollection):
         allowed_bases = {"A", "C", "G", "T", "R", "Y", "S", "W", "K", "M", "B", "D", "H", "V", "N"}
         keys = set(seq_coll._u1_to_uint8_mapping.keys())
         assert allowed_bases - keys == set()
+
+
+class TestFastaInit(TestSequenceCollection):
+    """
+    Test SequenceCollection fasta initialization
+    """
+
+    @pytest.fixture
+    def mock_fasta_file_1(self, mocker):
+        # data = "\n".join([f">{record_name}\n{seq}" for record_name, seq in self.seq_list_1])
+        data = self.fasta_str_1
+        mocked_data = mocker.mock_open(read_data=data)
+        mocker.patch("builtins.open", mocked_data)
+
+    @pytest.fixture
+    def mock_fasta_file_2(self, mocker):
+        # data = "\n".join([f">{record_name}\n{seq}" for record_name, seq in self.seq_list_2])
+        data = self.fasta_str_2
+        mocked_data = mocker.mock_open(read_data=data)
+        mocker.patch("builtins.open", mocked_data)
+
+    @pytest.fixture
+    def mock_empty_sequence_fasta_file(self, mocker):
+        data = ">chr1\nATGC\n>chr2\n\n>chr3\nATGC"
+        mocked_data = mocker.mock_open(read_data=data)
+        mocker.patch("builtins.open", mocked_data)
+
+    @pytest.fixture
+    def mock_fasta_file_with_illegal_base(self, mocker):
+        data = ">chr1\nATGC+"
+        mocked_data = mocker.mock_open(read_data=data)
+        mocker.patch("builtins.open", mocked_data)
+
+    @pytest.fixture
+    def mock_fasta_file_with_repeated_record_name(self, mocker):
+        data = ">chr1\nATGC\n>chr1\nATGC"
+        mocked_data = mocker.mock_open(read_data=data)
+        mocker.patch("builtins.open", mocked_data)
+
+    def test_forward_init_01(self, mock_fasta_file_1):
+        """
+        Test sequence_list constructor with single chromosome
+        """
+        # seq_coll = SequenceCollection(fasta_file_path=mock_fasta_1, strands_to_load="forward")
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="forward"
+        )
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_1)
+        assert seq_coll.revcomp_sba is None
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_1
+        )
+        assert seq_coll._revcomp_sba_seg_starts is None
+
+        # check other values that should be set
+        assert seq_coll.forward_record_names == self.forward_record_names_1
+        assert seq_coll.revcomp_record_names is None
+        assert seq_coll._strands_loaded == "forward"
+
+    def test_forward_init_02(self, mock_fasta_file_2):
+        """
+        Test sequence_list constructor with three chromosomes
+        """
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="forward"
+        )
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_2)
+        assert seq_coll.revcomp_sba is None
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_2
+        )
+        assert seq_coll._revcomp_sba_seg_starts is None
+
+        # check other values that should be set
+        assert seq_coll.forward_record_names == self.forward_record_names_2
+        assert seq_coll.revcomp_record_names is None
+        assert seq_coll._strands_loaded == "forward"
+
+    def test_revcomp_init_01(self, mock_fasta_file_1):
+        """
+        Test sequence_list constructor with single chromosome
+        """
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="reverse_complement"
+        )
+
+        # check sequence byte arrays
+        assert seq_coll.forward_sba is None
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_1)
+
+        # check seq start arrays
+        assert seq_coll._forward_sba_seg_starts is None
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_1
+        )
+
+        # check other values that should be set
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_1
+        assert seq_coll.forward_record_names is None
+        assert seq_coll._strands_loaded == "reverse_complement"
+
+    def test_revcomp_init_02(self, mock_fasta_file_2):
+        """
+        Test sequence_list constructor with three chromosomes
+        """
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="reverse_complement"
+        )
+
+        # check sequence byte arrays
+        assert seq_coll.forward_sba is None
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_2)
+
+        # check seq start arrays
+        assert seq_coll._forward_sba_seg_starts is None
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_2
+        )
+
+        # check other values that should be set
+        assert seq_coll.forward_record_names is None
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_2
+        assert seq_coll._strands_loaded == "reverse_complement"
+
+    def test_both_init_01(self, mock_fasta_file_1):
+        """
+        Test sequence_list constructor with single chromosome
+        """
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="both"
+        )
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_1)
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_1)
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_1
+        )
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_1
+        )
+
+        # check other values that should be set
+        assert seq_coll.forward_record_names == self.forward_record_names_1
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_1
+        assert seq_coll._strands_loaded == "both"
+
+    def test_both_init_02(self, mock_fasta_file_2):
+        """
+        Test sequence_list constructor with three chromosomes
+        """
+        seq_coll = SequenceCollection(
+            fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="both"
+        )
+
+        # check sequence byte arrays
+        assert np.array_equal(seq_coll.forward_sba, self.expected_forward_sba_2)
+        assert np.array_equal(seq_coll.revcomp_sba, self.expected_revcomp_sba_2)
+
+        # check seq start arrays
+        assert np.array_equal(
+            seq_coll._forward_sba_seg_starts, self.expected_forward_sba_seq_starts_2
+        )
+        assert np.array_equal(
+            seq_coll._revcomp_sba_seg_starts, self.expected_revcomp_sba_seq_starts_2
+        )
+
+        # check other values that should be set
+        assert seq_coll.forward_record_names == self.forward_record_names_2
+        assert seq_coll.revcomp_record_names == self.revcomp_record_names_2
+        assert seq_coll._strands_loaded == "both"
+
+    def test_init_error_01(self, mock_fasta_file_with_illegal_base):
+        """
+        Non-allowed base
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(fasta_file_path=Path("mock_file_path.fa"), strands_to_load="forward")
+
+    def test_init_error_02(self, mock_empty_sequence_fasta_file):
+        """
+        Empty sequence
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(
+                fasta_file_path=Path("mock_fasta_path.fa"), strands_to_load="forward"
+            )
+
+    def test_init_error_03(self, mock_fasta_file_with_repeated_record_name):
+        """
+        Repeated sequence record name
+        """
+        with pytest.raises(ValueError):
+            SequenceCollection(fasta_file_path="mock_file_path.fa", strands_to_load="forward")
 
 
 class TestSbaMapping(TestSequenceCollection):
