@@ -1,3 +1,4 @@
+import tempfile
 import time
 from typing import Union
 
@@ -92,6 +93,11 @@ def run_get_segment_num_from_sba_index(
     """
     for sba_index in sba_indices:
         seq_coll.get_segment_num_from_sba_index(sba_index, sba_strand)
+
+
+@get_run_time
+def run_fasta_init(fasta_file_path, strand):
+    SequenceCollection(fasta_file_path=fasta_file_path, strands_to_load=strand)
 
 
 def profile_seq_list_init(
@@ -252,6 +258,98 @@ def profile_get_segment_num_from_sba_index(
 
     # construct a dataframe from the profiling data
     columns = ["total_seq_len", "num_chromosomes", "num_lookups"] + [
+        f"run_time_{i}" for i in range(num_iterations)
+    ]
+    profiling_df = pd.DataFrame(profiling_data, columns=columns)
+    profiling_df["avg_run_time"] = profiling_df.iloc[:, 3:].mean(axis=1)
+
+    return profiling_df
+
+
+def write_seq_list_to_file(seq_list: list[tuple[str, str]], out_file, max_line_length: int = 80):
+    """
+    Write seq_list to out_file (file-like object) with a maximum line length before line break of
+    max_line_length.
+
+    Args:
+        seq_list (list[tuple[str, str]]): list of sequence ID and sequence string pairs
+        out_file (file-like object): output file to which to write
+        max_line_length (int, optional): Maximum line length before a new line. Defaults to 80.
+
+    Raises:
+        ValueError: raised if any record_id is longer than max_line_length since it cannot be
+            wrapped like a sequence could
+    """
+    for record_id, seq in seq_list:
+        if len(record_id) > max_line_length:
+            raise ValueError(
+                f"record_id ({record_id}) is longer than max_line_length ({max_line_length})"
+            )
+        out_file.write(f">{record_id}\n")
+        for start in range(0, len(seq), max_line_length):
+            end = min(start + max_line_length, len(seq))
+            out_file.write(seq[start:end])
+            out_file.write("\n")
+
+
+def profile_fasta_init(
+    total_seq_lengths: list[int] = [1000, 10000, 100000],
+    num_chromosomes: int = 10,
+    max_line_length: int = 80,
+    strand: str = "forward",
+    num_iterations: int = 3,
+    seed: int = 42,
+    discard_first_run: bool = True,
+) -> pd.DataFrame:
+    """
+    Profile SequenceCollection initialization by fasta file.
+
+    Args:
+        total_seq_lengths (list[int], optional): total sequence length for generated fasta file.
+            Defaults to [1000, 10000, 100000].
+        num_chromosomes (int, optional): number of chromosomes for generated fasta file. Defaults
+            to 10.
+        max_line_length (int, optional): maximum line length before a new line. Defaults to 80.
+        strand (str, optional): strand to load during fasta init. Defaults to "forward".
+        num_iterations (int, optional): number of iterations for profiling. Defaults to 3.
+        seed (int, optional): random number generator seed. Defaults to 42.
+        discard_first_run (bool, optional): whether to disregard the first run when profiling. This
+            is useful when numba JIT is used and takes significantly longer the first time a
+            function is called and compiled. Defaults to True.
+
+    Returns:
+        pd.DataFrame: pandas dataframe with summary stats
+    """
+    np.random.seed(seed)
+    profiling_data = []
+    for total_seq_len in total_seq_lengths:
+
+        num_iterations_to_run = num_iterations + 1 if discard_first_run else num_iterations
+        row = [total_seq_len, num_chromosomes, max_line_length]
+        for iter_num in range(num_iterations_to_run):
+
+            # get a randomly generated sequence list with the desired length and number of
+            # chromosomes
+            seq_list = get_random_seq_list(total_seq_len, num_chromosomes)
+
+            with tempfile.NamedTemporaryFile(delete=False, mode="w") as temp_file:
+                # write seq_list to temporary fasta file
+                write_seq_list_to_file(seq_list, temp_file, max_line_length=max_line_length)
+                temp_file.close()
+
+                # run fasta init
+                fasta_file_path = temp_file.name
+                run_time = run_fasta_init(fasta_file_path, strand=strand)
+
+            # run once without tracking timing since numba compile throws it off
+            if discard_first_run and iter_num == 0:
+                continue
+            else:
+                row.append(run_time)
+        profiling_data.append(row)
+
+    # construct a dataframe from the profiling data
+    columns = ["total_seq_len", "num_chromosomes", "max_line_length"] + [
         f"run_time_{i}" for i in range(num_iterations)
     ]
     profiling_df = pd.DataFrame(profiling_data, columns=columns)
