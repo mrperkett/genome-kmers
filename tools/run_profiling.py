@@ -3,7 +3,7 @@ import logging
 import os
 import time
 
-from profiling.utils import (
+from genome_kmers.profiling import (
     profile_fasta_init,
     profile_get_segment_num_from_sba_index,
     profile_seq_list_init,
