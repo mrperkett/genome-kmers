@@ -38,3 +38,4 @@ profile = "black"
 addopts = [
     "--import-mode=importlib",
 ]
+pythonpath = ["src"]
