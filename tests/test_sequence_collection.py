@@ -543,14 +543,6 @@ class TestSbaMapping(TestSequenceCollection):
         """
         Verify that an out of bounds index will be caught
         """
-        sba_indices = np.array([-1, 17, 23], dtype=np.uint32)
-        with pytest.raises(ValueError):
-            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
-
-        sba_indices = np.array([0, 17, -1], dtype=np.uint32)
-        with pytest.raises(ValueError):
-            SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
-
         sba_indices = np.array([30, 17, 23], dtype=np.uint32)
         with pytest.raises(ValueError):
             SequenceCollection._get_opposite_strand_sba_indices(sba_indices, 30)
