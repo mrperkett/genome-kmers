@@ -50,56 +50,61 @@ class SequenceCollection:
 
     Terminology
     -----------
-    sba: sequence byte array
-    revcomp: reverse complement
-    record: each header and its corresponding sequence is called a record.  record_num is based on
-        the order that records are read in.  record_num does **not** change when reverse
-        complemented
-    segement: is the same as a record except that segment_num always starts leftmost.  i.e. the
-        sba end index for segment N is always less than the sba end index for segment M > N
-    forward_sba_idx: index in forward sequence byte array
-    revcomp_sba_idx: index in reverse complement sequence byte array
-    forward_seq_idx: 0-based index for a sequence on the forward strand
-    revcomp_seq_idx: 0-based index for a sequence on the reverse complement strand
-
-    Forward strand
-    --------------
-    record_num                   0           1                  2
-    segment_num                  0           1                  2
-    forward_record_name          A           B                  C
-    forward_sba              [-------]$[------------]$[--------------------]
-                             |       | |            | |                    |
-    forward_sba_seg_starts   0       | 10           | 25                   |
-    forward_sba_seg_ends             8              23                     46
+    .. code-block::
 
 
-    Reverse complement strand
-    -------------------------
-    revcomp_sba_seg_ends                          21             36        46
-    revcomp_sba_seg_starts   0                    | 23           | 38      |
-                             |                    | |            | |       |
-    revcomp_sba              [====================]$[============]$[=======]
-    revcomp_record_name                C                   B           A
-    segment_num                        0                   1           2
-    record_num                         2                   1           0
+        sba: sequence byte array
+        revcomp: reverse complement
+        record: each header and its corresponding sequence is called a record.  record_num is based on
+            the order that records are read in.  record_num does not change when reverse
+            complemented
+        segement: is the same as a record except that segment_num always starts leftmost.  i.e. the
+            sba end index for segment N is always less than the sba end index for segment M > N
+        forward_sba_idx: index in forward sequence byte array
+        revcomp_sba_idx: index in reverse complement sequence byte array
+        forward_seq_idx: 0-based index for a sequence on the forward strand
+        revcomp_seq_idx: 0-based index for a sequence on the reverse complement strand
 
+        Forward strand
+        --------------
+        record_num                   0           1                  2
+        segment_num                  0           1                  2
+        forward_record_name          A           B                  C
+        forward_sba              [-------]$[------------]$[--------------------]
+                                 |       | |            | |                    |
+        forward_sba_seg_starts   0       | 10           | 25                   |
+        forward_sba_seg_ends             8              23                     46
+
+        Reverse complement strand
+        -------------------------
+        revcomp_sba_seg_ends                          21             36        46
+        revcomp_sba_seg_starts   0                    | 23           | 38      |
+                                 |                    | |            | |       |
+        revcomp_sba              [====================]$[============]$[=======]
+        revcomp_record_name                C                   B           A
+        segment_num                        0                   1           2
+        record_num                         2                   1           0
 
     Notes
     -----
-    - a "$" is placed between each sequence so that you can determine if you've reached the end of
-        a sequence without referencing the seg_starts / seg_ends array.
-    - the collection must contain at least one sequence
-    - all sequences in the collection must have a length > 0
-    - duplicate record_names are not allowed
+    .. code-block::
+
+        - a "$" is placed between each sequence so that you can determine if you've reached the end of
+            a sequence without referencing the seg_starts / seg_ends array.
+        - the collection must contain at least one sequence
+        - all sequences in the collection must have a length > 0
+        - duplicate record_names are not allowed
 
     Members
     -------
-    forward_sba (np.array): forward sba (dtype=uint8)
-    _forward_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
-        segment on the forward strand. (dtype=uint32)
-    revcomp_sba (np.array): reverse complement sba (dtype=uint8)
-    _revcomp_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
-        segment on the reverse complement strand. (dtype=uint32)
+    .. code-block::
+
+        forward_sba (np.array): forward sba (dtype=uint8)
+        _forward_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
+            segment on the forward strand. (dtype=uint32)
+        revcomp_sba (np.array): reverse complement sba (dtype=uint8)
+        _revcomp_sba_seg_starts (np.array): value at index i gives the sba start index for the ith
+            segment on the reverse complement strand. (dtype=uint32)
     """
 
     def __init__(

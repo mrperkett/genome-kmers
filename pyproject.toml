@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "genome-kmers"
-version = "0.1.1"
+version = "0.1.2"
 description = "fast and memory-efficient genomic k-mer calculations"
 authors = ["Matthew Perkett"]
 readme = "README.md"
