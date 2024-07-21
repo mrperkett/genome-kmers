@@ -1,12 +1,22 @@
 [tool.poetry]
 name = "genome-kmers"
-version = "0.1.0"
-description = ""
+version = "0.1.1"
+description = "fast and memory-efficient genomic k-mer calculations"
 authors = ["Matthew Perkett"]
 readme = "README.md"
+license = "LICENSE"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.9"
 biopython = "^1.83"
 numba = "^0.59.1"
 numpy = "^1.26.4"
@@ -39,3 +49,8 @@ addopts = [
     "--import-mode=importlib",
 ]
 pythonpath = ["src"]
+
+[project.urls]
+Homepage = "https://github.com/mrperkett/genome-kmers"
+Documentation = "https://github.com/mrperkett/genome-kmers"
+Issues = "https://github.com/mrperkett/genome-kmers/issues"
