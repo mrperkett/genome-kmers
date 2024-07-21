@@ -51,6 +51,6 @@ addopts = [
 pythonpath = ["src"]
 
 [project.urls]
-Homepage = "https://github.com/mrperkett/genome-kmers"
-Documentation = "https://github.com/mrperkett/genome-kmers"
+Homepage = "https://genome-kmers.readthedocs.io/en/latest/index.html"
+Documentation = "https://genome-kmers.readthedocs.io/en/latest/index.html"
 Issues = "https://github.com/mrperkett/genome-kmers/issues"
