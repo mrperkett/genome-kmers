@@ -17,15 +17,13 @@ Potential applications include:
 - using to build a suffix trie (though more memory efficient algorithms for this task exist)
 
 
-**NOTE:** This is a beta release with only `SequenceCollection` having been implemented.  `Kmers` is in dev and will be released soon.
+**NOTE:** This is a alpha release with only `SequenceCollection` having been implemented.  `Kmers` is in dev and will be released soon.
 
 
 # Setup
 
-NOTE: this section will be completed after publishing to PyPI.  It is anticipated that the following will work for installation:
-
 ```shell
-pip install genome-kmers
+python3 -m pip install genome-kmers
 ```
 
 ## Basic usage
@@ -102,20 +100,21 @@ ValueError: self._strands_loaded (both) cannot be 'both'
 You can also iterate over SequenceCollection records using `iter_records`.  This method yields the record name along with the start and end indices of the sequence as stored in the sequence byte array.  This is primarily used for downstream `Kmer` class calculations.
 
 ```python
+>>> seq_coll = SequenceCollection(sequence_list=seq_list)
 >>> for record_name, sba_seg_start_idx, sba_seg_end_idx in seq_coll.iter_records():
 ...    print(f"{record_name}")
 ...    print(f"\tseq byte array start index: {sba_seg_start_idx}")
-...    print(f"\tseq byte array start index: {sba_seg_end_idx}")
+...    print(f"\tseq byte array end index: {sba_seg_end_idx}")
 
 chr1
         seq byte array start index: 0
-        seq byte array start index: 9
+        seq byte array end index: 9
 chr2
         seq byte array start index: 11
-        seq byte array start index: 22
+        seq byte array end index: 22
 chr3
         seq byte array start index: 24
-        seq byte array start index: 36
+        seq byte array end index: 36
 ```
 
 The `Kmer` class defines a *k-mer* by its `SequenceCollection` byte array index.  As such, it is often required to determine with which sequence record a $k-mer$ is associated from only the sequence byte array index.  This can be determined in varying levels of detail using `get_record_loc_from_sba_index`, `get_record_name_from_sba_index`, and `get_segment_num_from_sba_index`.
