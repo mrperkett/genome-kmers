@@ -5,6 +5,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 
+from genome_kmers.kmers import Kmers
 from genome_kmers.sequence_collection import SequenceCollection
 
 
@@ -98,6 +99,11 @@ def run_get_segment_num_from_sba_index(
 @get_run_time
 def run_fasta_init(fasta_file_path, strand):
     SequenceCollection(fasta_file_path=fasta_file_path, strands_to_load=strand)
+
+
+@get_run_time
+def run_kmers_sort(kmers):
+    kmers.sort()
 
 
 def profile_seq_list_init(
@@ -354,5 +360,89 @@ def profile_fasta_init(
     ]
     profiling_df = pd.DataFrame(profiling_data, columns=columns)
     profiling_df["avg_run_time"] = profiling_df.iloc[:, 3:].mean(axis=1)
+
+    return profiling_df
+
+
+def profile_kmers_sort(
+    total_seq_lengths: list[int] = [1000, 10000, 100000],
+    min_kmer_len: int = 1,
+    max_kmer_lens: list[int] = [20, 30, 50, None],
+    num_chromosomes: int = 10,
+    max_line_length: int = 80,
+    strand: str = "forward",
+    num_iterations: int = 3,
+    seed: int = 42,
+    discard_first_run: bool = True,
+) -> pd.DataFrame:
+    """
+    Profile Kmers sort.
+
+    Args:
+        total_seq_lengths (list[int], optional): total sequence length for generated fasta file.
+            Defaults to [1000, 10000, 100000].
+        min_kmer_len (int, optional): shortest allowed kmer length. Defaults to 1.
+        max_kmer_lens (list[int], optional): list of max allowed kmer sizes to test. Defaults to
+            [20, 30, 50, None].
+        num_chromosomes (int, optional): number of chromosomes for generated fasta file. Defaults
+            to 10.
+        max_line_length (int, optional): maximum line length before a new line. Defaults to 80.
+        strand (str, optional): strand to load during fasta init. Defaults to "forward".
+        num_iterations (int, optional): number of iterations for profiling. Defaults to 3.
+        seed (int, optional): random number generator seed. Defaults to 42.
+        discard_first_run (bool, optional): whether to disregard the first run when profiling. This
+            is useful when numba JIT is used and takes significantly longer the first time a
+            function is called and compiled. Defaults to True.
+
+    Returns:
+        pd.DataFrame: pandas dataframe with summary stats
+    """
+    np.random.seed(seed)
+    profiling_data = []
+    num_iterations_to_run = num_iterations + 1 if discard_first_run else num_iterations
+    for total_seq_len in total_seq_lengths:
+        # get a randomly generated sequence list with the desired length and number of
+        # chromosomes
+        seq_list = get_random_seq_list(total_seq_len, num_chromosomes)
+        with tempfile.NamedTemporaryFile(delete=False, mode="w") as temp_file:
+            # write seq_list to temporary fasta file
+            write_seq_list_to_file(seq_list, temp_file, max_line_length=max_line_length)
+            temp_file.close()
+
+            # initialize SequenceCollection and Kmers
+            fasta_file_path = temp_file.name
+            seq_coll = SequenceCollection(fasta_file_path=fasta_file_path, strands_to_load=strand)
+
+            # run profiling varying max_kmer_len
+            for max_kmer_len in max_kmer_lens:
+                row = [total_seq_len, num_chromosomes, max_line_length, min_kmer_len, max_kmer_len]
+                kmers = Kmers(
+                    seq_coll,
+                    min_kmer_len=min_kmer_len,
+                    max_kmer_len=max_kmer_len,
+                    source_strand="forward",
+                    track_strands_separately=False,
+                )
+                for iter_num in range(num_iterations_to_run):
+
+                    run_time = run_kmers_sort(kmers)
+
+                    # run once without tracking timing since numba compile throws it off
+                    if discard_first_run and iter_num == 0:
+                        continue
+                    else:
+                        row.append(run_time)
+                profiling_data.append(row)
+
+    # construct a dataframe from the profiling data
+    columns = [
+        "total_seq_len",
+        "num_chromosomes",
+        "max_line_length",
+        "min_kmer_len",
+        "max_kmer_len",
+    ] + [f"run_time_{i}" for i in range(num_iterations)]
+    profiling_df = pd.DataFrame(profiling_data, columns=columns)
+    profiling_df["avg_run_time"] = profiling_df.iloc[:, 5:].mean(axis=1)
 
     return profiling_df
