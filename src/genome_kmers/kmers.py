@@ -1,4 +1,8 @@
+from typing import Callable, Union
+
+import numba as nb
 import numpy as np
+from numba.misc import quicksort
 
 from genome_kmers.sequence_collection import SequenceCollection
 
@@ -10,7 +14,7 @@ class Kmers:
 
     def __init__(
         self,
-        sequence_collection: SequenceCollection,
+        seq_coll: SequenceCollection,
         min_kmer_len: tuple[int, None] = None,
         max_kmer_len: tuple[int, None] = None,
         source_strand: str = "forward",
@@ -21,7 +25,7 @@ class Kmers:
         Initialize Kmers
 
         Args:
-            sequence_collection (SequenceCollection): the sequence collection on which kmers are
+            seq_coll (SequenceCollection): the sequence collection on which kmers are
                 defined
             min_kmer_len (tuple[int, None], optional): kmers below this size are not considered.
                 Defaults to None.
@@ -65,7 +69,7 @@ class Kmers:
         seq_lengths = []
         min_seq_len = None
         num_records = 0
-        record_generator = sequence_collection.iter_records()
+        record_generator = seq_coll.iter_records()
         for _, sba_seg_start_idx, sba_seg_end_idx in record_generator:
             seq_length = sba_seg_end_idx - sba_seg_start_idx + 1
             seq_lengths.append(seq_length)
@@ -80,11 +84,11 @@ class Kmers:
             raise ValueError(
                 f"min_kmer_len ({min_kmer_len}) must be <= the shortest sequence length ({min_seq_len})"
             )
-        if sequence_collection.strands_loaded() != source_strand:
+        if seq_coll.strands_loaded() != source_strand:
             # for now, require that source_strand matches what is in the SequenceCollection for ease
             # of implementation
             raise ValueError(
-                f"source_strand ({source_strand}) does not match sequence_collection loaded strand ({sequence_collection.strands_loaded()})"
+                f"source_strand ({source_strand}) does not match sequence_collection loaded strand ({seq_coll.strands_loaded()})"
             )
 
         # check that argument values have implemented functionality
@@ -98,7 +102,7 @@ class Kmers:
             )
 
         # set member variables based on arguments
-        self.sequence_collection = sequence_collection
+        self.seq_coll = seq_coll
         if min_kmer_len is None:
             self.min_kmer_len = 1
         else:
@@ -168,7 +172,7 @@ class Kmers:
         self.kmer_sba_start_indices = np.zeros(num_kmers, dtype=np.uint32)
 
         # iterate over records initializing kmer start indices
-        record_generator = self.sequence_collection.iter_records()
+        record_generator = self.seq_coll.iter_records()
         last_filled_index = -1
         for _, sba_seg_start_idx, sba_seg_end_idx in record_generator:
             num_kmers_in_record = (sba_seg_end_idx - sba_seg_start_idx + 1) - self.min_kmer_len + 1
@@ -205,7 +209,7 @@ class Kmers:
         # TODO: when SequenceCollection has a method to get num_records, remove the counter below
         num_kmers = 0
         num_records = 0
-        record_generator = self.sequence_collection.iter_records()
+        record_generator = self.seq_coll.iter_records()
         for _, sba_seg_start_idx, sba_seg_end_idx in record_generator:
             num_kmers_in_record = (sba_seg_end_idx - sba_seg_start_idx + 1) - self.min_kmer_len + 1
             num_kmers += num_kmers_in_record
@@ -218,7 +222,7 @@ class Kmers:
         return num_kmers
 
     def __len__(self):
-        pass
+        return len(self.kmer_sba_start_indices)
 
     def __getitem__(self):
         pass
@@ -277,11 +281,224 @@ class Kmers:
         """
         pass
 
+    def get_kmer(self, kmer_num: int, kmer_len: Union[int, None] = None) -> str:
+        """
+        Get the kmer_num'th kmer of kmer_len.
+
+        Args:
+            kmer_num (int): which number kmer to return (in range [0, num_kmers - 1])
+            kmer_len (Union[int, None], optional): length of kmer to return. If kmer_len is None,
+                return the longest possible, which is when the segment ends or the kmer_max_len
+                is reached. Defaults to None.
+
+        Raises:
+            NotImplementedError: kmer_source_strand and strands_loaded must both be "forward"
+            ValueError: kmer_num is invalid
+            ValueError: kmer_len is invalid
+
+        Returns:
+            str: kmer
+        """
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # verify that kmer_num is valid
+        if kmer_num < 0:
+            raise ValueError(f"kmer_num ({kmer_num}) cannot be less than zero")
+        if kmer_num >= len(self):
+            raise ValueError(f"kmer_num ({kmer_num}) is out of bounds (num kmers = {len(self)})")
+
+        # verify that kmer_len is valid
+        # TODO: consider allowing user to select a shorter or longer kmer than during sorting
+        if kmer_len is not None and kmer_len < self.min_kmer_len:
+            raise ValueError(
+                f"kmer_len ({kmer_len}) is less than min_kmer_len ({self.min_kmer_len})"
+            )
+        if self.max_kmer_len is not None and kmer_len > self.max_kmer_len:
+            raise ValueError(
+                f"kmer_len ({kmer_len}) is greater than max_kmer_len ({self.max_kmer_len})"
+            )
+
+        sba_start_idx = self.kmer_sba_start_indices[kmer_num]
+        seg_num = self.seq_coll.get_segment_num_from_sba_index(sba_start_idx)
+        _, sba_seg_end_idx = self.seq_coll.get_sba_start_end_indices_for_segment(seg_num)
+
+        if kmer_len is None:
+            largest_kmer_len = sba_seg_end_idx - sba_start_idx + 1
+            if self.max_kmer_len is None:
+                kmer_len = largest_kmer_len
+            else:
+                kmer_len = min(self.max_kmer_len, largest_kmer_len)
+
+        # verify that kmer_num is in-bounds
+        if sba_start_idx + kmer_len - 1 > sba_seg_end_idx:
+            raise ValueError(
+                f"kmer_len ({kmer_len}) for kmer_num ({kmer_num}) extends beyond the end of the segment"
+            )
+
+        sba = self.seq_coll.forward_sba
+        return bytearray(sba[sba_start_idx : sba_start_idx + kmer_len]).decode("utf-8")
+
     def sort(self):
         """
-        Sort kmers.  This is the most computationally expensive step
+        Sort (in place) the kmer_sba_start_indices array by lexicographically comparing the kmers
+        defined at each index.
+
+        Raises:
+            NotImplementedError: kmer_source_strand and strands_loaded must both be "forward"
         """
-        pass
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # build the is_less_than() comparison function to be passed to quicksort
+        is_less_than = self.get_is_less_than_func()
+
+        # compile the sorting function
+        quicksort_func = quicksort.make_jit_quicksort(lt=is_less_than, is_argsort=False)
+        jit_sort_func = nb.njit(quicksort_func.run_quicksort)
+
+        # sort
+        jit_sort_func(self.kmer_sba_start_indices)
+
+        self._sorted = True
+
+        return
+
+    def get_is_less_than_func(
+        self, validate_kmers: bool = True, break_ties: bool = True
+    ) -> Callable:
+        """
+        Returns a less than function that takes two integers as input and returns whether the
+        kmer defined by the first index is less than the kmer defined by the second index.
+
+        NOTE: If break_ties is True, then it will return True if the first of two equal kmers has
+        a smaller sba_start_index. This is useful to gauranteeing identical output between different
+        runs.
+
+        Args:
+            validate_kmers (bool, optional): Explicitly verify that both kmers are at least of
+                min_kmer_len. Defaults to True.
+            break_ties (bool, optional): if two kmers are lexicographically equivalent, break the
+                tie usind the sba_start_index. Defaults to True.
+
+        Raises:
+            NotImplementedError: kmer_source_strand and strands_loaded must both be "forward"
+
+        Returns:
+            Callable: is_less_than_func
+        """
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # assign to local variables the member variables to which is_less_than() needs access
+        sba = self.seq_coll.forward_sba
+        min_kmer_len = self.min_kmer_len
+        max_kmer_len = self.max_kmer_len
+
+        def is_less_than(kmer_sba_start_idx_a: int, kmer_sba_start_idx_b: int) -> bool:
+            """
+            Returns whether the kmer starting at idx_a is lexicographically less than the kmer
+            starting at idx_b. Validates that both kmer_a and kmer_b are at least min_kmer_len. The
+            comparison stops when max_kmer_len is reached.  If max_kmer_len is None, then the
+            comparison stops upon reaching the end of a segment.
+
+            Args:
+                kmer_sba_start_idx_a (int): index in the sequence byte array at which kmer_a
+                    begins
+                kmer_sba_start_idx_b (int): index in the sequence byte array at which kmer_b
+                    begins
+
+            Raises:
+                AssertionError: kmer_a and/or kmer_b is shorter min_kmer_len
+
+            Returns:
+                bool: kmer_a is lexicographically less than kmer_b
+            """
+            # initialize a_lt_b to the value for when kmers are lexicographically equal.  If
+            # break_ties is defined, compare the kmer_sba_start_idx's
+            if break_ties:
+                a_lt_b = kmer_sba_start_idx_a < kmer_sba_start_idx_b
+            else:
+                a_lt_b = False
+
+            # walk index-by-index along kmer_a and kmer_b comparing the bases at each position
+            n = 0
+            while True:
+                # break if max_kmer_len has been reached
+                if max_kmer_len is not None and n == max_kmer_len:
+                    break
+
+                # index to compare for each kmer
+                idx_a = kmer_sba_start_idx_a + n
+                idx_b = kmer_sba_start_idx_b + n
+
+                # determine whether the kmer has reached the end of a segment
+                idx_a_is_at_end_of_segment = (
+                    True if idx_a >= len(sba) or sba[idx_a] == ord("$") else False
+                )
+                idx_b_is_at_end_of_segment = (
+                    True if idx_b >= len(sba) or sba[idx_b] == ord("$") else False
+                )
+
+                # break if we have reached the end of a segment
+                if idx_a_is_at_end_of_segment or idx_b_is_at_end_of_segment:
+                    # if only idx_a has reached the end of the segment, then it is < kmer_b
+                    if idx_a_is_at_end_of_segment and not idx_b_is_at_end_of_segment:
+                        a_lt_b = True
+                    if idx_b_is_at_end_of_segment and not idx_a_is_at_end_of_segment:
+                        a_lt_b = False
+                    # otherwise they are equal and the default value of a_lt_b should be used
+                    break
+
+                # check whether kmer_a < kmer_b (and vice versa)
+                if sba[idx_a] < sba[idx_b]:
+                    a_lt_b = True
+                    break
+                if sba[idx_a] > sba[idx_b]:
+                    a_lt_b = False
+                    break
+
+                n += 1
+
+            # verify that kmer_a and kmer_b are at least of length min_kmer_len
+            if validate_kmers:
+                for i in range(n, min_kmer_len):
+                    # index to compare for each kmer
+                    idx_a = kmer_sba_start_idx_a + i
+                    idx_b = kmer_sba_start_idx_b + i
+
+                    # determine whether the kmer has reached the end of a segment
+                    idx_a_is_at_end_of_segment = (
+                        True if idx_a >= len(sba) or sba[idx_a] == ord("$") else False
+                    )
+                    idx_b_is_at_end_of_segment = (
+                        True if idx_b >= len(sba) or sba[idx_b] == ord("$") else False
+                    )
+
+                    # if end of segment has been reached, the kmer is invalid
+                    if idx_a_is_at_end_of_segment or idx_b_is_at_end_of_segment:
+                        raise AssertionError(
+                            f"kmers compared were less than min_kmer_len ({min_kmer_len}).  Was kmer_sba_start_indices initialized correctly?"
+                        )
+
+            return a_lt_b
+
+        return is_less_than
 
     def to_csv(self, kmer_len, output_file_path, fields=["kmer"]):
         """

@@ -1015,3 +1015,46 @@ class SequenceCollection:
             )
 
         return segment_num
+
+    def get_sba_start_end_indices_for_segment(
+        self, segment_num: int, sba_strand: str = None
+    ) -> tuple[int, int]:
+        """
+        Given a segment number (and optionally sba_strand), return the first sba index and
+        last sba index of the segment.
+
+        Args:
+            segment_num (int): segment number
+            sba_strand (str, optional): sequence byte array strand ("forward",
+                "reverse_complement", or "both"). Defaults to None.
+
+        Raises:
+            ValueError: segment_num out of bounds
+
+        Returns:
+            tuple[int, int]: sba_start_index, sba_end_index
+        """
+        # set sba_strand to either "forward" or "reverse_complement" based provided argument
+        sba_strand = self._get_sba_strand_to_use(sba_strand)
+
+        if sba_strand == "forward":
+            sba_seg_starts = self._forward_sba_seg_starts
+            sba = self.forward_sba
+        elif sba_strand == "reverse_complement":
+            sba_seg_starts = self._revcomp_sba_seg_starts
+            sba = self.revcomp_sba
+
+        # verify segment_num is allowed
+        if segment_num < 0:
+            raise ValueError(f"segment_num ({segment_num}) is out of bounds")
+        elif segment_num >= len(sba_seg_starts):
+            raise ValueError(f"segment_num ({segment_num}) is out of bounds")
+
+        # get start_index
+        sba_start_index = sba_seg_starts[segment_num]
+        if segment_num == len(sba_seg_starts) - 1:
+            sba_end_index = len(sba) - 1
+        else:
+            sba_end_index = sba_seg_starts[segment_num + 1] - 2
+
+        return sba_start_index, sba_end_index
