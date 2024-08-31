@@ -6,6 +6,7 @@ import time
 from genome_kmers.profiling import (
     profile_fasta_init,
     profile_get_segment_num_from_sba_index,
+    profile_kmers_sort,
     profile_seq_list_init,
 )
 
@@ -39,7 +40,7 @@ def parse_args():
         "-c",
         type=str,
         default="all",
-        choices=["all", "seq_list_init", "fasta_init", "get_segment_num"],
+        choices=["all", "seq_list_init", "fasta_init", "get_segment_num", "kmers_sort"],
     )
     parser.add_argument(
         "--output-base",
@@ -207,6 +208,57 @@ def run_fasta_init_profiling(run_size: str, num_iterations: int, output_base: st
     logging.info(f"Total fasta_init_profiling run time: {run_time}")
 
 
+def run_kmers_sort_profiling(run_size: str, num_iterations: int, output_base: str = None):
+    """
+    Profile Kmers sort.
+
+    Args:
+        run_size (str): "small", "medium", or "large".  Determines level of profiling with
+            "small" giving a quick but incomplete profiling summary and "large" giving a slower
+            but more complete profiling summary.
+        num_iterations (int): number of iterations to average over during profiling
+        output_base (str, optional): output file base that is used as the prefix for profiling
+            output files.  If not provided, then no files are written.  Defaults to None.
+
+    Raises:
+        ValueError: raised if run_size is not recognized
+    """
+    if run_size == "small":
+        total_seq_lengths = [int(1e3), int(1e6)]
+        max_kmer_lens = [1, 10]
+    elif run_size == "medium":
+        total_seq_lengths = [int(1e7)]
+        max_kmer_lens = [10, 20, 50, None]
+    elif run_size == "large":
+        total_seq_lengths = [int(1e8)]
+        max_kmer_lens = [20, None]
+    else:
+        raise ValueError(f"run_size ({run_size}) not recognized")
+
+    start_time = time.time()
+    logging.info(f"profile_kmers_sort")
+    df = profile_kmers_sort(
+        total_seq_lengths=total_seq_lengths,
+        min_kmer_len=1,
+        max_kmer_lens=max_kmer_lens,
+        num_chromosomes=10,
+        max_line_length=80,
+        strand="forward",
+        num_iterations=num_iterations,
+        seed=42,
+        discard_first_run=True,
+    )
+    logging.info(f"\n{df}")
+
+    if output_base is not None:
+        out_file_path = f"{output_base}-kmers_sort.csv"
+        df.to_csv(out_file_path, header=True, index=False)
+        logging.info(f"profiling info written to '{out_file_path}'")
+
+    run_time = time.time() - start_time
+    logging.info(f"Total kmers_sort_profiling run time: {run_time}")
+
+
 def main():
     """
     Run profiling script
@@ -225,6 +277,9 @@ def main():
 
     if args.category in ("all", "fasta_init"):
         run_fasta_init_profiling(run_size, num_iterations, args.output_base)
+
+    if args.category in ("all", "kmers_sort"):
+        run_kmers_sort_profiling(run_size, num_iterations, args.output_base)
 
     return
 

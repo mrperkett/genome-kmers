@@ -30,26 +30,26 @@ Example commands
     # activate the dev venv (either `poetry shell` or `pyenv <venv_name>`)
 
     # run all (small parameter set)
-    python3 profiling/run_profiling.py
+    python3 tools/run_profiling.py
 
     # run single category of profiling
-    python3 profiling/run_profiling.py -c fasta_init
+    python3 tools/run_profiling.py -c fasta_init
 
     # run a different number of iterations
-    python3 profiling/run_profiling.py -n 10 -c fasta_init
+    python3 tools/run_profiling.py -n 10 -c fasta_init
 
     # save profiling info to file
-    python3 profiling/run_profiling.py -s small -c fasta_init -o output/profiling-small
+    python3 tools/run_profiling.py -s small -c fasta_init -o output/profiling-small
 
     # run all profiling (large parameter set)
-    python3 profiling/run_profiling.py -s large -o output/profiling-large
+    python3 tools/run_profiling.py -s large -o output/profiling-large
 
 Call signature
 --------------
 
 .. code-block:: bash
 
-    $ python3 profiling/run_profiling.py --help
+    $ python3 tools/run_profiling.py --help
     usage: run_profiling.py [-h] [--run-size {small,medium,large}] [--num-iter NUM_ITER]
                             [--category {all,seq_list_init,fasta_init,get_segment_num}] [--output-base OUTPUT_BASE]
 
@@ -60,7 +60,7 @@ Call signature
                             complete.
     --num-iter NUM_ITER, -n NUM_ITER
                             number of run times over which to average. Must be > 0.
-    --category {all,seq_list_init,fasta_init,get_segment_num}, -c {all,seq_list_init,fasta_init,get_segment_num}
+    --category {all,seq_list_init,fasta_init,get_segment_num}, -c {all,seq_list_init,fasta_init,get_segment_num,kmers_sort}
     --output-base OUTPUT_BASE, -o OUTPUT_BASE
                             output file base that is used as the prefix for profiling output files
 
@@ -74,7 +74,7 @@ run all profiling (small)
 .. code-block:: bash
 
     $ poetry shell
-    $ python3 profiling/run_profiling.py
+    $ python3 tools/run_profiling.py
 
     INFO:root:sequence list init: 'forward' strand
     INFO:root:
@@ -128,7 +128,7 @@ run single category of profiling
 .. code-block:: bash
 
     $ poetry shell
-    $ python3 profiling/run_profiling.py -c fasta_init
+    $ python3 tools/run_profiling.py -c fasta_init
 
     INFO:root:profile_fasta_init
     INFO:root:
@@ -144,7 +144,7 @@ run a different number of iterations
 .. code-block:: bash
 
     $ poetry shell
-    $ python3 profiling/run_profiling.py -n 10 -c fasta_init
+    $ python3 tools/run_profiling.py -n 10 -c fasta_init
 
     INFO:root:profile_fasta_init
     INFO:root:
@@ -161,7 +161,7 @@ save profiling info to file
 .. code-block:: bash
 
     $ poetry shell
-    $ python3 profiling/run_profiling.py -s small -c fasta_init -o output/profiling-small
+    $ python3 tools/run_profiling.py -s small -c fasta_init -o output/profiling-small
 
     INFO:root:profile_fasta_init
     INFO:root:
@@ -178,7 +178,7 @@ run all profiling (large)
 .. code-block:: bash
 
     $ poetry shell
-    $ python3 profiling/run_profiling.py -s large -o output/profiling-large
+    $ python3 tools/run_profiling.py -s large -o output/profiling-large
 
     INFO:root:sequence list init: 'forward' strand
     INFO:root:
