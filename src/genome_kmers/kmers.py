@@ -1,4 +1,4 @@
-from typing import Callable, Union
+from typing import Callable, Generator, Union
 
 import numba as nb
 import numpy as np
@@ -6,6 +6,33 @@ from numba import jit
 from numba.misc import quicksort
 
 from genome_kmers.sequence_collection import SequenceCollection
+
+
+@jit
+def kmer_filter_keep_all(sba: np.array, sba_strand: str, kmer_sba_start_idx: int):
+    return True
+
+
+@jit
+def kmer_is_valid(sba: np.array, sba_start_idx: int, min_kmer_len: int) -> bool:
+    for idx in range(sba_start_idx, sba_start_idx + min_kmer_len):
+        # determine whether the kmer has reached the end of a segment
+        idx_is_at_end_of_segment = True if idx >= len(sba) or sba[idx] == ord("$") else False
+
+        # if end of segment has been reached, the kmer is invalid
+        if idx_is_at_end_of_segment:
+            return False
+    return True
+
+
+def get_compare_sba_kmers_func(kmer_len):
+    @jit
+    def compare_sba_kmers_func(sba_a, sba_b, kmer_sba_start_idx_a, kmer_sba_start_idx_b):
+        return compare_sba_kmers(
+            sba_a, sba_b, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
+        )
+
+    return compare_sba_kmers_func
 
 
 @jit
@@ -100,6 +127,109 @@ def compare_sba_kmers(
         kmer_idx += 1
 
     return comparison, last_kmer_index_compared
+
+
+@jit
+def kmer_nums_by_group_generator(
+    sba: np.array,
+    sba_strand: str,
+    kmer_start_indices: np.array,
+    kmer_comparison_func: Callable,
+    kmer_filter_func: Callable,
+    min_group_size: int = 1,
+    max_group_size: Union[int, None] = None,
+    yield_first_n: Union[int, None] = None,
+) -> Generator[tuple[list[int], int], None, None]:
+    """
+    Generator that yields the valid kmer numbers and total group size for all groups meeting
+    requirements.  A valid kmer is one that passes the provided kmer_filter_func.  A group is
+    defined as the set of identical kmers.  Kmer equality is determined using the provided
+    kmer_comparison_func.  The first "yield_first_n" kmers will be yielded if the group meets all
+    provided requirements.  It must have a total group size between min_group_size and
+    max_group_size (inclusive).
+
+    Args:
+        sba (np.array): sequence byte array
+        sba_strand (str): "forward" or "reverse_complement"
+        kmer_start_indices (np.array): kmer sequence byte array start indices
+        kmer_comparison_func (Callable): function that returns the result of a two kmer comparison
+        kmer_filter_func (Callable): function that returns true if a kmer passes all filters
+        min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
+        max_group_size (Union[int, None], optional): Largest allowed group size.  If None, then
+            there is no maximum group size. Defaults to None.
+        yield_first_n (Union[int, None], optional): yield up to this many kmer_nums. Defaults to
+            None.
+
+    Raises:
+        ValueError: invalide min_group_size, max_group_size, or yield_first_n
+
+    Yields:
+        Generator[tuple[list[int], int], None, None]: valid_kmer_nums_in_group, group_size
+    """
+    # check arguments
+    if min_group_size < 1:
+        raise ValueError(f"min_group_size ({min_group_size}) must be >= 1")
+    if max_group_size is not None and max_group_size < min_group_size:
+        raise ValueError(
+            f"if max_group_size ({max_group_size}) is specified, it must be >= min_group_size ({min_group_size})"
+        )
+    if yield_first_n is not None and yield_first_n < 1:
+        raise ValueError(f"if yield_first_n ({yield_first_n}) is specified, it must be > 0")
+
+    # iterate through all kmers storing kmers that pass all filters and yielding results when a new
+    # group is reached
+    # NOTE: the empty list is initialized like it is below so that numba can infer its type
+    # https://numba.readthedocs.io/en/stable/user/troubleshoot.html#my-code-has-an-untyped-list-problem
+    valid_kmer_nums_in_group = [i for i in range(0)]
+    group_size = 0
+    prev_valid_kmer_sba_start_idx = None
+    for kmer_num in range(0, len(kmer_start_indices)):
+
+        # skip the kmer if it does not pass all filters
+        kmer_sba_start_idx = kmer_start_indices[kmer_num]
+        passes_all_filters = kmer_filter_func(sba, sba_strand, kmer_sba_start_idx)
+        if not passes_all_filters:
+            continue
+
+        # if this is the first valid kmer, set prev_valid_kmer_sba_start_idx and treat as if it is
+        # in the same group
+        if prev_valid_kmer_sba_start_idx is None:
+            prev_valid_kmer_sba_start_idx = kmer_sba_start_idx
+            in_same_group = True
+        # otherwise, check whether we are in the same group by comparing to the last valid kmer
+        else:
+            comparison, last_kmer_index_compared = kmer_comparison_func(
+                sba, sba, prev_valid_kmer_sba_start_idx, kmer_sba_start_idx
+            )
+            in_same_group = True if comparison == 0 else False
+            prev_valid_kmer_sba_start_idx = kmer_sba_start_idx
+
+        # if we are in a the same group, increment group size and add to valid_kmer_nums_in_group
+        if in_same_group:
+            group_size += 1
+            if yield_first_n is None or len(valid_kmer_nums_in_group) < yield_first_n:
+                valid_kmer_nums_in_group.append(kmer_num)
+
+        # otherwise, we are in a new group - yield info and start a new group
+        else:
+            # yield the completed group if it meets requirements
+            meets_min_group_size = group_size >= min_group_size
+            meets_max_group_size = max_group_size is None or group_size <= max_group_size
+            if meets_min_group_size and meets_max_group_size:
+                yield valid_kmer_nums_in_group, group_size
+
+            # reset tracking for the new group
+            group_size = 1
+            valid_kmer_nums_in_group = [kmer_num]
+
+    # there is likely one remaining group to yield (unless there were no valid groups)
+    # yield the completed group if it meets requirements
+    meets_min_group_size = group_size >= min_group_size
+    meets_max_group_size = max_group_size is None or group_size <= max_group_size
+    if meets_min_group_size and meets_max_group_size:
+        yield valid_kmer_nums_in_group, group_size
+
+    return
 class Kmers:
     """
     Defines memory-efficient kmers calculations on a genome.
