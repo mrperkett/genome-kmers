@@ -4,7 +4,10 @@ from typing import Union
 import numpy as np
 import pytest
 
-from genome_kmers.kmers import Kmers
+from genome_kmers.kmers import (
+    Kmers,
+    compare_sba_kmers,
+)
 from genome_kmers.sequence_collection import SequenceCollection
 
 
@@ -73,7 +76,13 @@ class TestKmers(unittest.TestCase):
         sorted_kmers = unsorted_kmers[:]
         sorted_kmers.sort()
 
-        return seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers
+        # build sorted_kmer_indices
+        num_kmers = len(unsorted_kmers)
+        sorted_kmer_numbers = [i for i in range(num_kmers)]
+        sorted_kmer_numbers.sort(key=lambda idx: unsorted_kmers[idx])
+        sorted_kmer_indices = [unsorted_kmer_indices[kmer_num] for kmer_num in sorted_kmer_numbers]
+
+        return seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices
 
 
 class TestInit(TestKmers):
@@ -90,8 +99,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, None
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, None)
         )
 
         kmers = Kmers(seq_coll)
@@ -114,8 +123,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -138,8 +147,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -163,8 +172,8 @@ class TestInit(TestKmers):
         max_kmer_len = 2
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -191,8 +200,8 @@ class TestInit(TestKmers):
         max_kmer_len = 1000
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -297,8 +306,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(seq_coll)
@@ -321,8 +330,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -344,8 +353,8 @@ class TestInit(TestKmers):
         max_kmer_len = None
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -369,8 +378,8 @@ class TestInit(TestKmers):
         max_kmer_len = 2
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -396,8 +405,8 @@ class TestInit(TestKmers):
         max_kmer_len = 1000
 
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         kmers = Kmers(
@@ -438,8 +447,8 @@ class TestSort(TestKmers):
         seq_list = self.seq_list_1
         min_kmer_len = 1
         max_kmer_len = None
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         # build Kmers and sort
@@ -470,8 +479,8 @@ class TestSort(TestKmers):
         seq_list = self.seq_list_2
         min_kmer_len = 1
         max_kmer_len = None
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         # build Kmers and sort
@@ -494,15 +503,242 @@ class TestSort(TestKmers):
 
         return
 
-    def get_expected_lt_result(self, kmer_i, kmer_j, kmer_idx_i, kmer_idx_j, break_ties):
+
+class TestKmerComparisons(TestKmers):
+    def get_parameter_combinations(self):
+        """
+        Helper function to build a comprehensive list of seq_list, min_kmer_len, and max_kmer_len
+        to test.
+
+        Returns:
+            list: params
+        """
+        params = []
+        for seq_list in [self.seq_list_1, self.seq_list_2]:
+            shortest_seq_len = min([len(seq) for _, seq in seq_list])
+            min_kmer_lens = [i for i in range(1, shortest_seq_len)]
+            for min_kmer_len in min_kmer_lens:
+                max_kmer_lens = [j for j in range(min_kmer_len, shortest_seq_len)] + [None]
+                for max_kmer_len in max_kmer_lens:
+                    params.append([seq_list, min_kmer_len, max_kmer_len])
+        return params
+
+    def get_expected_lt_result(
+        self,
+        kmer_i: str,
+        kmer_j: str,
+        kmer_sba_start_idx_i: int,
+        kmer_sba_start_idx_j: int,
+        break_ties: bool,
+    ) -> bool:
+        """
+        Helper function to get the expected less than comparison between two kmers strings
+        (optionally breaking ties by kmer index).
+
+        Args:
+            kmer_i (str): string kmer i
+            kmer_j (str): string kmer j
+            kmer_sba_start_idx_i (int): kmer sequence byte array start index i
+            kmer_sba_start_idx_j (int): kmer sequence byte array start index j
+            break_ties (bool): whether to break kmer_i == kmer_j ties
+
+        Returns:
+            bool: kmer_i < kmer_j.  if break_ties and kmer_i == kmer_j: kmer_idx_i < kmer_idx_j
+        """
         if break_ties:
             if kmer_i == kmer_j:
-                expected_result = kmer_idx_i < kmer_idx_j
+                expected_result = kmer_sba_start_idx_i < kmer_sba_start_idx_j
             else:
                 expected_result = kmer_i < kmer_j
         else:
             expected_result = kmer_i < kmer_j
         return expected_result
+
+    def test_get_expected_lt_result(self):
+        """
+        Tests verifying helper function
+        """
+        self.assertTrue(self.get_expected_lt_result("AT", "ATA", 0, 1, True))
+        self.assertTrue(self.get_expected_lt_result("AT", "ATA", 1, 0, True))
+        self.assertTrue(self.get_expected_lt_result("AT", "ATA", 0, 1, False))
+        self.assertTrue(self.get_expected_lt_result("AT", "ATA", 1, 0, False))
+        self.assertTrue(self.get_expected_lt_result("TTT", "TTT", 0, 1, True))
+        self.assertFalse(self.get_expected_lt_result("TTT", "TTT", 1, 0, True))
+        self.assertFalse(self.get_expected_lt_result("TTT", "TTT", 0, 1, False))
+        self.assertFalse(self.get_expected_lt_result("TTT", "TTT", 1, 0, False))
+
+    def get_expected_kmer_comparison(self, kmer_i: str, kmer_j: str) -> int:
+        """
+        Helper function to get the expected comparison between two kmer strings.
+
+        Examples:
+        kmer_i = "AAT"
+        kmer_j = "AAC"
+        get_expected_kmer_comparison(kmer_i, kmer_j) = 1
+        get_expected_kmer_comparison(kmer_j, kmer_i) = -1
+        get_expected_kmer_comparison(kmer_i[:2], kmer_j[:2]) = 0
+
+        Args:
+            kmer_i (str): string kmer i
+            kmer_j (str): string kmer j
+
+        Returns:
+            int: 0 if equal, -1 if kmer_i < kmer_j, 1 if kmer_i > kmer_j
+        """
+        expected_comparison = None
+        if kmer_i < kmer_j:
+            expected_comparison = -1
+        elif kmer_i == kmer_j:
+            expected_comparison = 0
+        else:
+            expected_comparison = 1
+        return expected_comparison
+
+    def test_get_expected_kmer_comparison(self):
+        """
+        Tests verifying helper function
+        """
+        assert self.get_expected_kmer_comparison("AAT", "AAC") == 1
+        assert self.get_expected_kmer_comparison("AAC", "AAT") == -1
+        assert self.get_expected_kmer_comparison("AA", "AA") == 0
+        assert self.get_expected_kmer_comparison("AA", "AAA") == -1
+        assert self.get_expected_kmer_comparison("AAA", "AA") == 1
+
+    def test_compare_sba_kmers_01(self):
+        """
+        Test compare_sba_kmers with seq_list_1 'manually'
+        """
+        seq_coll = self.seq_coll_1
+        min_kmer_len = 1
+        max_kmer_len = None
+
+        # initialize kmers object
+        kmers = Kmers(
+            seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+
+        # seq:                "ATCGAATTAG"
+        # kmer_sba_start_idx:  0123456789
+        sba = kmers.seq_coll.forward_sba
+
+        # compare "A" and "A"
+        kmer_sba_start_idx_a = 0
+        kmer_sba_start_idx_b = 4
+        kmer_len = 1
+        comparison, last_kmer_index_compared = compare_sba_kmers(
+            sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
+        )
+        assert comparison == 0 and last_kmer_index_compared == 0
+
+        # compare "AT" and "AA"
+        kmer_sba_start_idx_a = 0
+        kmer_sba_start_idx_b = 4
+        kmer_len = 2
+        comparison, last_kmer_index_compared = compare_sba_kmers(
+            sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
+        )
+        assert comparison == 1 and last_kmer_index_compared == 1
+
+        # compare "AA" and "AT"
+        kmer_sba_start_idx_a = 4
+        kmer_sba_start_idx_b = 0
+        kmer_len = 2
+        comparison, last_kmer_index_compared = compare_sba_kmers(
+            sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
+        )
+        assert comparison == -1 and last_kmer_index_compared == 1
+
+        # compare "GAATTAG" and "G"
+        kmer_sba_start_idx_a = 3
+        kmer_sba_start_idx_b = 9
+        kmer_len = None
+        comparison, last_kmer_index_compared = compare_sba_kmers(
+            sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
+        )
+        assert comparison == 1 and last_kmer_index_compared == 0
+
+    def run_single_compare_sba_kmers_test(
+        self,
+        seq_list: list[tuple[str, str]],
+        min_kmer_len: int,
+        max_kmer_len: Union[int, None],
+        source_strand: str = "forward",
+    ) -> None:
+        """
+        Test compare_sba_kmers() by building a Kmers() object from the input parameters and
+        verifying that all pairs of kmers for ever valid kmer_len match what is expected.
+
+        Args:
+            seq_list (list[tuple[str, str]]): sequence list from which to build SequenceCollection
+            min_kmer_len (int): Kmers() initialization parameter
+            max_kmer_len (Union[int, None]): Kmers() initialization parameter
+            source_strand (str, optional): Kmers() initialization parameter. Defaults to "forward".
+        """
+        # get expected results based on input arguments
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
+        )
+
+        # initialize kmers object
+        kmers = Kmers(
+            seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand=source_strand,
+            track_strands_separately=False,
+        )
+
+        # determine the valid kmer lengths
+        longest_seq_len = max([len(seq) for _, seq in seq_list])
+        if max_kmer_len is None:
+            valid_kmer_lens = [
+                kmer_len for kmer_len in range(min_kmer_len, longest_seq_len + 1)
+            ] + [None]
+        else:
+            valid_kmer_lens = [kmer_len for kmer_len in range(min_kmer_len, max_kmer_len + 1)]
+
+        # there are len(unsorted_kmers) kmers.  Compare all pairs verifying that they match what
+        # is expected for all valid kmer lengths
+        num_kmers = len(unsorted_kmer_indices)
+        sba = (
+            kmers.seq_coll.forward_sba if source_strand == "forward" else kmers.seq_coll.revcomp_sba
+        )
+        for i in range(num_kmers):
+            for j in range(num_kmers):
+                for kmer_len in valid_kmer_lens:
+                    # use _kmer_len to slice the kmer strings since kmer_len can be None
+                    _kmer_len = longest_seq_len if kmer_len is None else kmer_len
+                    kmer_i = unsorted_kmers[i][:_kmer_len]
+                    kmer_j = unsorted_kmers[j][:_kmer_len]
+                    kmer_sba_start_idx_i = unsorted_kmer_indices[i]
+                    kmer_sba_start_idx_j = unsorted_kmer_indices[j]
+
+                    # get the expected result of the comparison
+                    expected_comparison = self.get_expected_kmer_comparison(kmer_i, kmer_j)
+
+                    # get the result of the comparison
+                    comparison, last_kmer_index_compared = compare_sba_kmers(
+                        sba, sba, kmer_sba_start_idx_i, kmer_sba_start_idx_j, max_kmer_len=kmer_len
+                    )
+
+                    msg = f"i: {i} | j: {j} | kmer_len: {kmer_len} | "
+                    msg += f"kmer_i: {kmer_i} | kmer_j: {kmer_j} | "
+                    msg += f"comparison: {comparison} | expected_comparison: {expected_comparison}"
+                    assert comparison == expected_comparison
+
+    def test_compare_sba_kmers_comprehensive(self):
+        """
+        Test compare_sba_kmers() for all valid parameter combinations for seq_list_1 and
+        seq_list_2.
+        """
+        for seq_list, min_kmer_len, max_kmer_len in self.get_parameter_combinations():
+            self.run_single_compare_sba_kmers_test(seq_list, min_kmer_len, max_kmer_len, "forward")
+            # TODO: add test run for "reverse_complement" after it has been implemented
+        return
 
     def run_single_get_is_lt_func_test(
         self,
@@ -521,8 +757,8 @@ class TestSort(TestKmers):
             max_kmer_len (Union[int, None]): maximum kmer length used in Kmer initialization
         """
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         # initialize kmers object
@@ -570,20 +806,16 @@ class TestSort(TestKmers):
 
     def test_get_is_lt_func(self):
         """
-        Test all valid parameter combinations for seq_list_1 and seq_list_2.
+        Test is_lt_func() for all valid parameter combinations for seq_list_1 and
+        seq_list_2.
         """
-        for seq_list in [self.seq_list_1, self.seq_list_2]:
-            shortest_seq_len = min([len(seq) for _, seq in seq_list])
-            min_kmer_lens = [i for i in range(1, shortest_seq_len)]
-            for min_kmer_len in min_kmer_lens:
-                max_kmer_lens = [j for j in range(min_kmer_len, shortest_seq_len)] + [None]
-                for max_kmer_len in max_kmer_lens:
-                    self.run_single_get_is_lt_func_test(
-                        seq_list, min_kmer_len, max_kmer_len, break_ties=True
-                    )
-                    self.run_single_get_is_lt_func_test(
-                        seq_list, min_kmer_len, max_kmer_len, break_ties=False
-                    )
+        for seq_list, min_kmer_len, max_kmer_len in self.get_parameter_combinations():
+            self.run_single_get_is_lt_func_test(
+                seq_list, min_kmer_len, max_kmer_len, break_ties=True
+            )
+            self.run_single_get_is_lt_func_test(
+                seq_list, min_kmer_len, max_kmer_len, break_ties=False
+            )
 
         return
 
@@ -602,8 +834,8 @@ class TestKmerGenerator(TestKmers):
             max_kmer_len (Union[int, None]): maximum kmer length used in Kmer initialization
         """
         # get expected results based on input arguments
-        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers = self.get_expected_kmers(
-            seq_list, min_kmer_len, max_kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
         )
 
         # initialize kmers object

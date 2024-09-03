@@ -2,11 +2,104 @@ from typing import Callable, Union
 
 import numba as nb
 import numpy as np
+from numba import jit
 from numba.misc import quicksort
 
 from genome_kmers.sequence_collection import SequenceCollection
 
 
+@jit
+def compare_sba_kmers(
+    sba_a: np.array,
+    sba_b: np.array,
+    kmer_sba_start_idx_a: int,
+    kmer_sba_start_idx_b: int,
+    max_kmer_len: Union[int, None] = None,
+) -> tuple[int, int]:
+    """
+    Lexographically compare two kmers of length kmer_len.  If kmer_len is None, the end of the
+    segment defines the longest kmer.
+
+    NOTE: This function does no validation for kmer_len. It will compare up to max_kmer_len bases
+    if required, but it will return as soon as the comparison result is known.
+
+    Args:
+        sba_a (np.array): sequence byte array a
+        sba_b (np.array): sequence byte array b
+        kmer_sba_start_idx_a (int): index in sba that defines the start of kmer a
+        kmer_sba_start_idx_b (int): index in sba that defines the start of kmer b
+        kmer_len (Union[int, None], optional): Length of the kmers to compare.  If None, the
+            end of the segment defines the longest kmers to compare.. Defaults to None.
+
+    Raises:
+        AssertionError: there were no valid bases to compare
+
+    Returns:
+        tuple[int, int]: comparison, last_kmer_index_compared
+            comparison:
+                +1 = kmer_a > kmer_b
+                0 = kmer_a == kmer_b
+                -1 = kmer_a < kmer_b
+            last_kmer_index_compared: the kmer index of the last valid comparison done between two
+                bases.  If a single base was compare, then this value will be 0.
+    """
+    # Example
+    #
+    # str(sba):    ATGGGCTGCAAGCTCGA$AATTTAGCGGCCTAGGCTTA
+    # kmer_a:             [--------]
+    # kmer_b:                 [----]
+    #
+    # max_kmer_len  |   comparison
+    # 1             |   0
+    # 2             |   0
+    # 3             |   -1
+    # None          |   -1
+    kmer_idx = 0
+    comparison = 0
+    last_kmer_index_compared = None
+    while True:
+        # sba indices to compare
+        idx_a = kmer_sba_start_idx_a + kmer_idx
+        idx_b = kmer_sba_start_idx_b + kmer_idx
+
+        # is idx_a or idx_b out of bounds? (i.e. equal to "$" or overflowed)
+        idx_a_out_of_bounds = True if idx_a >= len(sba_a) or sba_a[idx_a] == ord("$") else False
+        idx_b_out_of_bounds = True if idx_b >= len(sba_b) or sba_b[idx_b] == ord("$") else False
+
+        # break if idx_a or idx_b is out of bounds
+        if idx_a_out_of_bounds or idx_b_out_of_bounds:
+            # set last_kmer_index_compared
+            last_kmer_index_compared = kmer_idx - 1
+            if last_kmer_index_compared < 0:
+                raise AssertionError(f"There were no valid kmer bases to compare")
+
+            # get comparison
+            if idx_a_out_of_bounds and not idx_b_out_of_bounds:
+                comparison = -1  # kmer_a < kmer_b
+            elif idx_b_out_of_bounds and not idx_a_out_of_bounds:
+                comparison = 1  # kmer_a > kmer_b
+            else:
+                comparison = 0  # kmer_a == kmer_b
+            break
+
+        # check whether kmer_a < kmer_b (and vice versa)
+        if sba_a[idx_a] < sba_b[idx_b]:
+            comparison = -1  # kmer_a < kmer_b
+            last_kmer_index_compared = kmer_idx
+            break
+        if sba_a[idx_a] > sba_b[idx_b]:
+            comparison = 1  # kmer_a > kmer_b
+            last_kmer_index_compared = kmer_idx
+            break
+
+        # break if kmer_len has been reached
+        if max_kmer_len is not None and kmer_idx == max_kmer_len - 1:
+            last_kmer_index_compared = kmer_idx
+            break
+
+        kmer_idx += 1
+
+    return comparison, last_kmer_index_compared
 class Kmers:
     """
     Defines memory-efficient kmers calculations on a genome.
@@ -375,7 +468,7 @@ class Kmers:
         return
 
     def get_is_less_than_func(
-        self, validate_kmers: bool = True, break_ties: bool = True
+        self, validate_kmers: bool = True, break_ties: bool = False
     ) -> Callable:
         """
         Returns a less than function that takes two integers as input and returns whether the
@@ -383,11 +476,11 @@ class Kmers:
 
         NOTE: If break_ties is True, then it will return True if the first of two equal kmers has
         a smaller sba_start_index. This is useful to gauranteeing identical output between different
-        runs.
+        runs.  However, it comes at a significant performance cost due to additional swapping required
 
         Args:
             validate_kmers (bool, optional): Explicitly verify that both kmers are at least of
-                min_kmer_len. Defaults to True.
+                min_kmer_len. Defaults to False.
             break_ties (bool, optional): if two kmers are lexicographically equivalent, break the
                 tie usind the sba_start_index. Defaults to True.
 
