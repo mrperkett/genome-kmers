@@ -1,4 +1,6 @@
+import itertools
 import unittest
+from collections import Counter
 from typing import Union
 
 import numpy as np
@@ -7,6 +9,9 @@ import pytest
 from genome_kmers.kmers import (
     Kmers,
     compare_sba_kmers,
+    get_compare_sba_kmers_func,
+    kmer_filter_keep_all,
+    kmer_nums_by_group_generator,
 )
 from genome_kmers.sequence_collection import SequenceCollection
 
@@ -38,6 +43,24 @@ class TestKmers(unittest.TestCase):
         )
 
         return
+
+    def get_parameter_combinations(self):
+        """
+        Helper function to build a comprehensive list of seq_list, min_kmer_len, and max_kmer_len
+        to test.
+
+        Returns:
+            list: params
+        """
+        params = []
+        for seq_list in [self.seq_list_1, self.seq_list_2]:
+            shortest_seq_len = min([len(seq) for _, seq in seq_list])
+            min_kmer_lens = [i for i in range(1, shortest_seq_len)]
+            for min_kmer_len in min_kmer_lens:
+                max_kmer_lens = [j for j in range(min_kmer_len, shortest_seq_len)] + [None]
+                for max_kmer_len in max_kmer_lens:
+                    params.append([seq_list, min_kmer_len, max_kmer_len])
+        return params
 
     def get_expected_kmers(
         self, seq_list: list[tuple[str, str]], min_kmer_len: int, max_kmer_len: Union[int, None]
@@ -505,23 +528,6 @@ class TestSort(TestKmers):
 
 
 class TestKmerComparisons(TestKmers):
-    def get_parameter_combinations(self):
-        """
-        Helper function to build a comprehensive list of seq_list, min_kmer_len, and max_kmer_len
-        to test.
-
-        Returns:
-            list: params
-        """
-        params = []
-        for seq_list in [self.seq_list_1, self.seq_list_2]:
-            shortest_seq_len = min([len(seq) for _, seq in seq_list])
-            min_kmer_lens = [i for i in range(1, shortest_seq_len)]
-            for min_kmer_len in min_kmer_lens:
-                max_kmer_lens = [j for j in range(min_kmer_len, shortest_seq_len)] + [None]
-                for max_kmer_len in max_kmer_lens:
-                    params.append([seq_list, min_kmer_len, max_kmer_len])
-        return params
 
     def get_expected_lt_result(
         self,
@@ -821,6 +827,365 @@ class TestKmerComparisons(TestKmers):
 
 
 class TestKmerGenerator(TestKmers):
+    """
+    Test kmer generator functions
+    """
+
+    def get_expected_group_kmers(
+        self,
+        sorted_kmers: list[str],
+        min_group_size: int = 1,
+        max_group_size: Union[int, None] = None,
+        yield_first_n: Union[int, None] = None,
+    ) -> tuple[list[int], int]:
+        """
+        Helper function that generates a list of all (kmer_nums, group_size) expected to be yielded
+        by the kmer_nums_by_group_generator() given the list of kmers.  To function as intended,
+        sorted_kmers must be sorted.
+
+        Example:
+        seq: ATATAGACAG
+        kmer_len: 2
+        unsorted_kmers: ["AT", "TA", "AT", "TA", "AG", "GA", "AC", "CA", "AG"]
+        sorted_kmers: ["AC", "AG", "AG", "AT", "AT", "CA", "GA", "TA", "TA"]
+        expected_kmer_nums_list = [ [0],
+                                    [1, 2],
+                                    [3, 4],
+                                    [5],
+                                    [6],
+                                    [7, 8]
+            ]
+        expected_group_sizes = [1, 2, 2, 1, 1, 2]
+
+        Args:
+            kmers (list[str]): A list of expected kmers
+
+        Returns:
+            tuple[list[list[int]], list[int]]: expected_kmer_nums_list, expected_group_sizes
+        """
+        # verify sorted_kmers is sorted
+        is_sorted = True
+        for i in range(1, len(sorted_kmers)):
+            if sorted_kmers[i] < sorted_kmers[i - 1]:
+                is_sorted = False
+                break
+        if not is_sorted:
+            raise ValueError("sorted_kmers is not sorted")
+
+        # step through the list of kmers adding to expected_kmer_nums_list each time a new group
+        # is encountered
+        num_kmers = len(sorted_kmers)
+        expected_kmer_nums_list = []
+        group_kmer_nums = []
+        for kmer_num in range(num_kmers):
+            kmer = sorted_kmers[kmer_num]
+            if kmer_num == 0:
+                # if it's the first iteration, set prev_kmer to be the current kmer
+                prev_kmer = kmer
+            else:
+                prev_kmer = sorted_kmers[kmer_num - 1]
+
+            # a new group is encountered whenever kmer does not match prev_kmer
+            if kmer != prev_kmer:
+                expected_kmer_nums_list.append(group_kmer_nums)
+                group_kmer_nums = [kmer_num]
+            else:
+                group_kmer_nums.append(kmer_num)
+
+            # if we reach the end of the list of kmers, add the last group
+            if kmer_num == num_kmers - 1:
+                expected_kmer_nums_list.append(group_kmer_nums)
+
+        # set expected_group_sizes
+        expected_group_sizes = [len(group) for group in expected_kmer_nums_list]
+
+        # filter by group size requirements
+        for i in range(len(expected_kmer_nums_list) - 1, -1, -1):
+            group_size = expected_group_sizes[i]
+            passes_min_group_size = group_size >= min_group_size
+            passes_max_group_size = max_group_size is None or group_size <= max_group_size
+            if not passes_min_group_size or not passes_max_group_size:
+                del expected_group_sizes[i]
+                del expected_kmer_nums_list[i]
+
+        # filter by yield_first_n requirements
+        if yield_first_n is not None:
+            for i in range(len(expected_kmer_nums_list)):
+                expected_kmer_nums_list[i] = expected_kmer_nums_list[i][:yield_first_n]
+
+        return expected_kmer_nums_list, expected_group_sizes
+
+    def test_get_expected_group_kmers_01(self):
+        """
+        Verify helper function.
+        """
+        sorted_kmers = ["AC", "AG", "AG", "AT", "AT", "CA", "GA", "TA", "TA"]
+        expected_kmer_nums_list = [[0], [1, 2], [3, 4], [5], [6], [7, 8]]
+        expected_group_sizes = [1, 2, 2, 1, 1, 2]
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(sorted_kmers)
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_02(self):
+        """
+        Verify helper function.
+        """
+        # verify on self.seq_coll_2
+        # sorted kmers for kmer_len = 3
+        # print([kmer[:n] for kmer in sorted_kmers if len(kmer) >= n])
+        sorted_kmers = [
+            "AAT",
+            "ACC",
+            "ATC",
+            "ATC",
+            "ATT",
+            "ATT",
+            "ATT",
+            "CAT",
+            "CCC",
+            "CCC",
+            "CCT",
+            "CGA",
+            "CTT",
+            "GAA",
+            "GAC",
+            "GAT",
+            "GAT",
+            "GCA",
+            "GGA",
+            "GTG",
+            "TAG",
+            "TCG",
+            "TCT",
+            "TGA",
+            "TGA",
+            "TGC",
+            "TTA",
+            "TTG",
+            "TTG",
+        ]
+        expected_kmer_nums_list = [
+            [0],
+            [1],
+            [2, 3],
+            [4, 5, 6],
+            [7],
+            [8, 9],
+            [10],
+            [11],
+            [12],
+            [13],
+            [14],
+            [15, 16],
+            [17],
+            [18],
+            [19],
+            [20],
+            [21],
+            [22],
+            [23, 24],
+            [25],
+            [26],
+            [27, 28],
+        ]
+        expected_group_sizes = [len(group) for group in expected_kmer_nums_list]
+
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(sorted_kmers)
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_01(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 1, yield_first_n = 1
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=1, yield_first_n=1
+        )
+        expected_kmer_nums_list = [[4]]
+        expected_group_sizes = [1]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_02(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 2, yield_first_n = 1
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=2, yield_first_n=1
+        )
+        expected_kmer_nums_list = [[4], [5]]
+        expected_group_sizes = [1, 2]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_03(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 2, yield_first_n = 2
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=2, yield_first_n=2
+        )
+        expected_kmer_nums_list = [[4], [5, 6]]
+        expected_group_sizes = [1, 2]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_04(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 3, yield_first_n = None
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=3, yield_first_n=None
+        )
+        expected_kmer_nums_list = [[4], [5, 6], [7, 8, 9]]
+        expected_group_sizes = [1, 2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_05(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 3, yield_first_n = 2
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=3, yield_first_n=2
+        )
+        expected_kmer_nums_list = [[4], [5, 6], [7, 8]]
+        expected_group_sizes = [1, 2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_06(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 3, yield_first_n = 1
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=3, yield_first_n=1
+        )
+        expected_kmer_nums_list = [[4], [5], [7]]
+        expected_group_sizes = [1, 2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_07(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 2, max_group = 3, yield_first_n = None
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=2, max_group_size=3, yield_first_n=None
+        )
+        expected_kmer_nums_list = [[5, 6], [7, 8, 9]]
+        expected_group_sizes = [2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_08(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 2, max_group = 3, yield_first_n = 2
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=2, max_group_size=3, yield_first_n=2
+        )
+        expected_kmer_nums_list = [[5, 6], [7, 8]]
+        expected_group_sizes = [2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_09(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 2, max_group = 3, yield_first_n = 1
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=2, max_group_size=3, yield_first_n=1
+        )
+        expected_kmer_nums_list = [[5], [7]]
+        expected_group_sizes = [2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_10(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 4, max_group = 100, yield_first_n = None
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=4, max_group_size=100, yield_first_n=None
+        )
+        expected_kmer_nums_list = [[0, 1, 2, 3]]
+        expected_group_sizes = [4]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_11(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 4, max_group = None, yield_first_n = None
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=4, max_group_size=None, yield_first_n=None
+        )
+        expected_kmer_nums_list = [[0, 1, 2, 3]]
+        expected_group_sizes = [4]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_get_expected_group_kmers_simple_12(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = None, yield_first_n = None
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers, min_group_size=1, max_group_size=None, yield_first_n=None
+        )
+        expected_kmer_nums_list = [[0, 1, 2, 3], [4], [5, 6], [7, 8, 9]]
+        expected_group_sizes = [4, 1, 2, 3]
+        self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+        self.assertListEqual(group_sizes, expected_group_sizes)
+
     def run_single_get_kmer_test(
         self, seq_list: list[tuple[str, str]], min_kmer_len: int, max_kmer_len: Union[int, None]
     ):
@@ -879,3 +1244,110 @@ class TestKmerGenerator(TestKmers):
                     self.run_single_get_kmer_test(seq_list, min_kmer_len, max_kmer_len)
 
         return
+
+    def run_single_kmer_nums_by_group_generator_test(
+        self, seq_list: list[tuple[str, str]], kmer_len: int
+    ) -> None:
+        """
+        Run a single kmer_nums_by_group_generator test for a given seq_list and kmer_len.  Note
+        that kmers will be exactly of kmer_len and this function does not test variable length
+        kmers.
+
+        NOTE: The parameters tested in this function are currently hard coded so that they
+        work in a reasonable amount of time on self.seq_list_2.  This could be adjusted if
+        necessary in the future.
+
+        Args:
+            seq_list (list[tuple[str, str]]): sequence list for SequenceCollection
+            kmer_len (int): length of kmer to test
+        """
+        # define the parameters to test the generator agains - they all impact group yielding
+        min_group_size_list = [1, 2, 3, 4]
+        max_group_size_list = [1, 2, 3, 4, 7, None]
+        yield_first_n_list = [1, 2, 3, 4, 7, None]
+        group_params = []
+        for min_group_size in min_group_size_list:
+            for max_group_size in max_group_size_list:
+                # NOTE: max_group_size cannot be less than min_group_size
+                if max_group_size is not None and max_group_size < min_group_size:
+                    continue
+                for yield_first_n in yield_first_n_list:
+                    group_params.append([min_group_size, max_group_size, yield_first_n])
+
+        # get expected results based on input arguments
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
+        )
+
+        # initialize kmers object
+        kmers = Kmers(
+            seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+
+        # sort kmers
+        kmers.sort()
+
+        # initialize the kmer_nums_by_group generator.  Set filter to keep all
+        sba = seq_coll.forward_sba
+        sba_strand = kmers.seq_coll.strands_loaded()
+        kmer_start_indices = kmers.kmer_sba_start_indices
+        kmer_comparison_func = get_compare_sba_kmers_func(kmer_len)
+        kmer_filter_func = kmer_filter_keep_all
+
+        # for each set of group yielding parameters, test the the generator yields as expected
+        for min_group_size, max_group_size, yield_first_n in group_params:
+            # initialize generator
+            generator = kmer_nums_by_group_generator(
+                sba=sba,
+                sba_strand=sba_strand,
+                kmer_start_indices=kmer_start_indices,
+                kmer_comparison_func=kmer_comparison_func,
+                kmer_filter_func=kmer_filter_func,
+                min_group_size=min_group_size,
+                max_group_size=max_group_size,
+                yield_first_n=yield_first_n,
+            )
+
+            # collect all items in the generator
+            kmer_nums_list = []
+            group_sizes = []
+            for kmer_nums, group_size in generator:
+                kmer_nums_list.append(kmer_nums)
+                group_sizes.append(group_size)
+
+            # check that everything matches what is expected
+            expected_kmer_nums_list, expected_group_sizes = self.get_expected_group_kmers(
+                sorted_kmers, min_group_size, max_group_size, yield_first_n
+            )
+            self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
+            self.assertListEqual(group_sizes, expected_group_sizes)
+
+    def test_kmer_nums_by_group_generator_comprehensive(self):
+        """
+        Comprehensive set of tests for kmer_nums_by_group_generator over seq_list_2 for varied
+        kmer lengths (variable kmer length is NOT tested).
+
+        NOTE: This test could be expanded to greater parameters at the cost of run time.
+        """
+        # the parameters over which to vary the test
+        seq_lists = [self.seq_list_2]
+        kmer_len_list = [1, 2, 3, 4, 8]
+
+        # run the tests
+        for seq_list in seq_lists:
+            for kmer_len in kmer_len_list:
+                self.run_single_kmer_nums_by_group_generator_test(seq_list, kmer_len)
+
+    def test_kmer_nums_by_group_generator_01(self):
+        """
+        Test a single kmer_nums_by_group_generator instance
+        """
+        seq_list = [("chr1", "ATCGAATTAG")]
+        kmer_len = 1
+        self.run_single_kmer_nums_by_group_generator_test(seq_list, kmer_len)
