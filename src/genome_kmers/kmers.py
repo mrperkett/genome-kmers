@@ -28,7 +28,7 @@ def kmer_is_valid(sba: np.array, sba_start_idx: int, min_kmer_len: int) -> bool:
 def get_compare_sba_kmers_func(kmer_len):
     @jit
     def compare_sba_kmers_func(sba_a, sba_b, kmer_sba_start_idx_a, kmer_sba_start_idx_b):
-        return compare_sba_kmers(
+        return compare_sba_kmers_lexicographically(
             sba_a, sba_b, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
         )
 
@@ -36,7 +36,18 @@ def get_compare_sba_kmers_func(kmer_len):
 
 
 @jit
-def compare_sba_kmers(
+def compare_sba_kmers_always_less_than(
+    sba_a: np.array,
+    sba_b: np.array,
+    kmer_sba_start_idx_a: int,
+    kmer_sba_start_idx_b: int,
+    max_kmer_len: Union[int, None] = None,
+) -> tuple[int, int]:
+    return -1, 0
+
+
+@jit
+def compare_sba_kmers_lexicographically(
     sba_a: np.array,
     sba_b: np.array,
     kmer_sba_start_idx_a: int,
@@ -44,7 +55,7 @@ def compare_sba_kmers(
     max_kmer_len: Union[int, None] = None,
 ) -> tuple[int, int]:
     """
-    Lexographically compare two kmers of length kmer_len.  If kmer_len is None, the end of the
+    Lexicographically compare two kmers of length kmer_len.  If kmer_len is None, the end of the
     segment defines the longest kmer.
 
     NOTE: This function does no validation for kmer_len. It will compare up to max_kmer_len bases
@@ -130,30 +141,63 @@ def compare_sba_kmers(
 
 
 @jit
-def kmer_nums_by_group_generator(
+def get_kmer_info_minimal(
+    kmer_num: int,
+    kmer_sba_start_indices: np.array,
+    sba: np.array,
+    kmer_len: Union[int, None],
+    group_size_yielded: int,
+    group_size_total: int,
+) -> tuple[int, int, int]:
+    """
+    Return only basic kmer information without any processing. Used as an input to
+    kmer_info_by_group_generator when only basic information is required.
+
+    Args:
+        kmer_num (int): kmer number
+        kmer_start_indices (np.array): kmer sequence byte array start indices
+        sba (np.array): sequence byte array
+        kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+        group_size_yielded (int): number of kmers in the group that will be yielded
+        group_size_total (int): number of kmers in the group in total
+
+    Returns:
+        tuple[int, int, int]: kmer_num, group_size_yielded, group_size_total
+    """
+
+    return kmer_num, group_size_yielded, group_size_total
+
+
+@jit(cache=False)
+def kmer_info_by_group_generator(
     sba: np.array,
     sba_strand: str,
+    kmer_len: Union[int, None],
     kmer_start_indices: np.array,
     kmer_comparison_func: Callable,
     kmer_filter_func: Callable,
+    kmer_info_func: Callable,
     min_group_size: int = 1,
     max_group_size: Union[int, None] = None,
     yield_first_n: Union[int, None] = None,
-) -> Generator[tuple[list[int], int], None, None]:
+) -> Generator[tuple, None, None]:
     """
-    Generator that yields the valid kmer numbers and total group size for all groups meeting
+    Generator that yields the valid kmer information and total group size for all groups meeting
     requirements.  A valid kmer is one that passes the provided kmer_filter_func.  A group is
-    defined as the set of identical kmers.  Kmer equality is determined using the provided
-    kmer_comparison_func.  The first "yield_first_n" kmers will be yielded if the group meets all
-    provided requirements.  It must have a total group size between min_group_size and
-    max_group_size (inclusive).
+    defined as the set of identical kmers as defined by the kmer_comparison_func. The first
+    "yield_first_n" kmers will be yielded if the group meets all provided requirements.  It must
+    have a total group size between min_group_size and max_group_size (inclusive). The kmer
+    information that is yielded is customizable and defined by kmer_info_func.
 
     Args:
         sba (np.array): sequence byte array
         sba_strand (str): "forward" or "reverse_complement"
+        kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
         kmer_start_indices (np.array): kmer sequence byte array start indices
         kmer_comparison_func (Callable): function that returns the result of a two kmer comparison
         kmer_filter_func (Callable): function that returns true if a kmer passes all filters
+        kmer_info_func (Callable): function that returns a tuple with all the kmer information to
+            yielded.
         min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
         max_group_size (Union[int, None], optional): Largest allowed group size.  If None, then
             there is no maximum group size. Defaults to None.
@@ -216,7 +260,17 @@ def kmer_nums_by_group_generator(
             meets_min_group_size = group_size >= min_group_size
             meets_max_group_size = max_group_size is None or group_size <= max_group_size
             if meets_min_group_size and meets_max_group_size:
-                yield valid_kmer_nums_in_group, group_size
+                # yield kmer_info for each valid kmer_num
+                group_size_yielded = len(valid_kmer_nums_in_group)
+                for kmer_num_in_group in valid_kmer_nums_in_group:
+                    yield kmer_info_func(
+                        kmer_num_in_group,
+                        kmer_start_indices,
+                        sba,
+                        kmer_len,
+                        group_size_yielded,
+                        group_size,
+                    )
 
             # reset tracking for the new group
             group_size = 1
@@ -227,7 +281,17 @@ def kmer_nums_by_group_generator(
     meets_min_group_size = group_size >= min_group_size
     meets_max_group_size = max_group_size is None or group_size <= max_group_size
     if meets_min_group_size and meets_max_group_size:
-        yield valid_kmer_nums_in_group, group_size
+        # yield kmer_info for each valid kmer_num
+        group_size_yielded = len(valid_kmer_nums_in_group)
+        for kmer_num_in_group in valid_kmer_nums_in_group:
+            yield kmer_info_func(
+                kmer_num_in_group,
+                kmer_start_indices,
+                sba,
+                kmer_len,
+                group_size_yielded,
+                group_size,
+            )
 
     return
 class Kmers:
@@ -593,7 +657,7 @@ class Kmers:
         # sort
         jit_sort_func(self.kmer_sba_start_indices)
 
-        self._sorted = True
+        self._is_sorted = True
 
         return
 
@@ -635,89 +699,42 @@ class Kmers:
 
         def is_less_than(kmer_sba_start_idx_a: int, kmer_sba_start_idx_b: int) -> bool:
             """
-            Returns whether the kmer starting at idx_a is lexicographically less than the kmer
-            starting at idx_b. Validates that both kmer_a and kmer_b are at least min_kmer_len. The
-            comparison stops when max_kmer_len is reached.  If max_kmer_len is None, then the
-            comparison stops upon reaching the end of a segment.
+            Returns whether kmer_a is less than kmer_b.
 
             Args:
-                kmer_sba_start_idx_a (int): index in the sequence byte array at which kmer_a
-                    begins
-                kmer_sba_start_idx_b (int): index in the sequence byte array at which kmer_b
-                    begins
-
-            Raises:
-                AssertionError: kmer_a and/or kmer_b is shorter min_kmer_len
+                kmer_sba_start_idx_a (int): start index in the sequence byte array for kmer_a
+                kmer_sba_start_idx_b (int): start index in the sequence byte array for kmer_b
 
             Returns:
-                bool: kmer_a is lexicographically less than kmer_b
+                bool: a_lt_b
             """
-            # initialize a_lt_b to the value for when kmers are lexicographically equal.  If
-            # break_ties is defined, compare the kmer_sba_start_idx's
-            if break_ties:
-                a_lt_b = kmer_sba_start_idx_a < kmer_sba_start_idx_b
-            else:
+            # compare kmers
+            comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
+                sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=max_kmer_len
+            )
+            if comparison < 0:
+                a_lt_b = True
+            elif comparison > 0:
                 a_lt_b = False
-
-            # walk index-by-index along kmer_a and kmer_b comparing the bases at each position
-            n = 0
-            while True:
-                # break if max_kmer_len has been reached
-                if max_kmer_len is not None and n == max_kmer_len:
-                    break
-
-                # index to compare for each kmer
-                idx_a = kmer_sba_start_idx_a + n
-                idx_b = kmer_sba_start_idx_b + n
-
-                # determine whether the kmer has reached the end of a segment
-                idx_a_is_at_end_of_segment = (
-                    True if idx_a >= len(sba) or sba[idx_a] == ord("$") else False
-                )
-                idx_b_is_at_end_of_segment = (
-                    True if idx_b >= len(sba) or sba[idx_b] == ord("$") else False
-                )
-
-                # break if we have reached the end of a segment
-                if idx_a_is_at_end_of_segment or idx_b_is_at_end_of_segment:
-                    # if only idx_a has reached the end of the segment, then it is < kmer_b
-                    if idx_a_is_at_end_of_segment and not idx_b_is_at_end_of_segment:
-                        a_lt_b = True
-                    if idx_b_is_at_end_of_segment and not idx_a_is_at_end_of_segment:
-                        a_lt_b = False
-                    # otherwise they are equal and the default value of a_lt_b should be used
-                    break
-
-                # check whether kmer_a < kmer_b (and vice versa)
-                if sba[idx_a] < sba[idx_b]:
-                    a_lt_b = True
-                    break
-                if sba[idx_a] > sba[idx_b]:
+            else:
+                if break_ties:
+                    a_lt_b = kmer_sba_start_idx_a < kmer_sba_start_idx_b
+                else:
                     a_lt_b = False
-                    break
-
-                n += 1
 
             # verify that kmer_a and kmer_b are at least of length min_kmer_len
             if validate_kmers:
-                for i in range(n, min_kmer_len):
-                    # index to compare for each kmer
-                    idx_a = kmer_sba_start_idx_a + i
-                    idx_b = kmer_sba_start_idx_b + i
-
-                    # determine whether the kmer has reached the end of a segment
-                    idx_a_is_at_end_of_segment = (
-                        True if idx_a >= len(sba) or sba[idx_a] == ord("$") else False
+                num_bases_to_check = min_kmer_len - (last_kmer_index_compared + 1)
+                kmer_a_is_valid = kmer_is_valid(
+                    sba, kmer_sba_start_idx_a + last_kmer_index_compared + 1, num_bases_to_check
+                )
+                kmer_b_is_valid = kmer_is_valid(
+                    sba, kmer_sba_start_idx_b + last_kmer_index_compared + 1, num_bases_to_check
+                )
+                if not kmer_a_is_valid or not kmer_b_is_valid:
+                    raise AssertionError(
+                        f"kmers compared were less than min_kmer_len ({min_kmer_len}).  Was kmer_sba_start_indices initialized correctly?"
                     )
-                    idx_b_is_at_end_of_segment = (
-                        True if idx_b >= len(sba) or sba[idx_b] == ord("$") else False
-                    )
-
-                    # if end of segment has been reached, the kmer is invalid
-                    if idx_a_is_at_end_of_segment or idx_b_is_at_end_of_segment:
-                        raise AssertionError(
-                            f"kmers compared were less than min_kmer_len ({min_kmer_len}).  Was kmer_sba_start_indices initialized correctly?"
-                        )
 
             return a_lt_b
 
