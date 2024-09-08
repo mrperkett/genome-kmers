@@ -8,10 +8,11 @@ import pytest
 
 from genome_kmers.kmers import (
     Kmers,
-    compare_sba_kmers,
+    compare_sba_kmers_lexicographically,
     get_compare_sba_kmers_func,
+    get_kmer_info_minimal,
     kmer_filter_keep_all,
-    kmer_nums_by_group_generator,
+    kmer_info_by_group_generator,
 )
 from genome_kmers.sequence_collection import SequenceCollection
 
@@ -635,7 +636,7 @@ class TestKmerComparisons(TestKmers):
         kmer_sba_start_idx_a = 0
         kmer_sba_start_idx_b = 4
         kmer_len = 1
-        comparison, last_kmer_index_compared = compare_sba_kmers(
+        comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
             sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
         )
         assert comparison == 0 and last_kmer_index_compared == 0
@@ -644,7 +645,7 @@ class TestKmerComparisons(TestKmers):
         kmer_sba_start_idx_a = 0
         kmer_sba_start_idx_b = 4
         kmer_len = 2
-        comparison, last_kmer_index_compared = compare_sba_kmers(
+        comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
             sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
         )
         assert comparison == 1 and last_kmer_index_compared == 1
@@ -653,7 +654,7 @@ class TestKmerComparisons(TestKmers):
         kmer_sba_start_idx_a = 4
         kmer_sba_start_idx_b = 0
         kmer_len = 2
-        comparison, last_kmer_index_compared = compare_sba_kmers(
+        comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
             sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
         )
         assert comparison == -1 and last_kmer_index_compared == 1
@@ -662,7 +663,7 @@ class TestKmerComparisons(TestKmers):
         kmer_sba_start_idx_a = 3
         kmer_sba_start_idx_b = 9
         kmer_len = None
-        comparison, last_kmer_index_compared = compare_sba_kmers(
+        comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
             sba, sba, kmer_sba_start_idx_a, kmer_sba_start_idx_b, max_kmer_len=kmer_len
         )
         assert comparison == 1 and last_kmer_index_compared == 0
@@ -727,7 +728,7 @@ class TestKmerComparisons(TestKmers):
                     expected_comparison = self.get_expected_kmer_comparison(kmer_i, kmer_j)
 
                     # get the result of the comparison
-                    comparison, last_kmer_index_compared = compare_sba_kmers(
+                    comparison, last_kmer_index_compared = compare_sba_kmers_lexicographically(
                         sba, sba, kmer_sba_start_idx_i, kmer_sba_start_idx_j, max_kmer_len=kmer_len
                     )
 
@@ -858,7 +859,12 @@ class TestKmerGenerator(TestKmers):
         expected_group_sizes = [1, 2, 2, 1, 1, 2]
 
         Args:
-            kmers (list[str]): A list of expected kmers
+            sorted_kmers (list[str]): sorted kmers
+            min_group_size (int, optional): minimum group size to yield. Defaults to 1.
+            max_group_size (Union[int, None], optional): maximum group size to yield. None means
+                that there is no maximum group size. Defaults to None.
+            yield_first_n (Union[int, None], optional): number to yield before stopping.  None
+                means to yield them all. Defaults to None.
 
         Returns:
             tuple[list[list[int]], list[int]]: expected_kmer_nums_list, expected_group_sizes
@@ -914,6 +920,41 @@ class TestKmerGenerator(TestKmers):
                 expected_kmer_nums_list[i] = expected_kmer_nums_list[i][:yield_first_n]
 
         return expected_kmer_nums_list, expected_group_sizes
+
+    def get_expected_kmer_info_generator_output(
+        self,
+        sorted_kmers: list[str],
+        min_group_size: int = 1,
+        max_group_size: Union[int, None] = None,
+        yield_first_n: Union[int, None] = None,
+    ) -> list[list[int]]:
+        """
+        Helper function to generate expected output of kmer_info_generator (assuming kmer_info_func
+        is get_kmer_info_minimal()).
+
+        Args:
+            sorted_kmers (list[str]): _description_min_group_size (int, optional): minimum group size to yield. Defaults to 1.
+            max_group_size (Union[int, None], optional): maximum group size to yield. None means
+                that there is no maximum group size. Defaults to None.
+            yield_first_n (Union[int, None], optional): number to yield before stopping.  None
+                means to yield them all. Defaults to None.
+
+        Returns:
+            list[list[int]]: kmer_info
+        """
+        kmer_nums_list, group_sizes = self.get_expected_group_kmers(
+            sorted_kmers,
+            min_group_size,
+            max_group_size,
+            yield_first_n,
+        )
+        kmer_info = []
+        for kmer_nums, group_size in zip(kmer_nums_list, group_sizes):
+            group_size_total = group_size
+            group_size_yielded = len(kmer_nums)
+            for kmer_num in kmer_nums:
+                kmer_info.append([kmer_num, group_size_yielded, group_size_total])
+        return kmer_info
 
     def test_get_expected_group_kmers_01(self):
         """
@@ -1186,6 +1227,35 @@ class TestKmerGenerator(TestKmers):
         self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
         self.assertListEqual(group_sizes, expected_group_sizes)
 
+    def test_get_expected_kmer_info_generator_output_01(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 1, yield_first_n = 1
+
+        kmer_info = self.get_expected_kmer_info_generator_output(
+            sorted_kmers, min_group_size=1, max_group_size=1, yield_first_n=1
+        )
+        expected_kmer_info = [[4, 1, 1]]
+        self.assertListEqual(kmer_info, expected_kmer_info)
+
+    def test_get_expected_kmer_info_generator_output_04(self):
+        """
+        Verify helper function.
+        """
+        # indices        0    1    2    3    4    5    6    7    8    9
+        sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
+
+        # min_group = 1, max_group = 3, yield_first_n = None
+        kmer_info = self.get_expected_kmer_info_generator_output(
+            sorted_kmers, min_group_size=1, max_group_size=3, yield_first_n=None
+        )
+        expected_kmer_info = [[4, 1, 1], [5, 2, 2], [6, 2, 2], [7, 3, 3], [8, 3, 3], [9, 3, 3]]
+        self.assertListEqual(kmer_info, expected_kmer_info)
+
     def run_single_get_kmer_test(
         self, seq_list: list[tuple[str, str]], min_kmer_len: int, max_kmer_len: Union[int, None]
     ):
@@ -1245,11 +1315,11 @@ class TestKmerGenerator(TestKmers):
 
         return
 
-    def run_single_kmer_nums_by_group_generator_test(
+    def run_single_kmer_info_by_group_generator_test(
         self, seq_list: list[tuple[str, str]], kmer_len: int
     ) -> None:
         """
-        Run a single kmer_nums_by_group_generator test for a given seq_list and kmer_len.  Note
+        Run a single kmer_info_by_group_generator test for a given seq_list and kmer_len.  Note
         that kmers will be exactly of kmer_len and this function does not test variable length
         kmers.
 
@@ -1293,7 +1363,7 @@ class TestKmerGenerator(TestKmers):
         # sort kmers
         kmers.sort()
 
-        # initialize the kmer_nums_by_group generator.  Set filter to keep all
+        # initialize the kmer_info_by_group generator.  Set filter to keep all
         sba = seq_coll.forward_sba
         sba_strand = kmers.seq_coll.strands_loaded()
         kmer_start_indices = kmers.kmer_sba_start_indices
@@ -1303,34 +1373,31 @@ class TestKmerGenerator(TestKmers):
         # for each set of group yielding parameters, test the the generator yields as expected
         for min_group_size, max_group_size, yield_first_n in group_params:
             # initialize generator
-            generator = kmer_nums_by_group_generator(
+            generator = kmer_info_by_group_generator(
                 sba=sba,
                 sba_strand=sba_strand,
+                kmer_len=kmer_len,
                 kmer_start_indices=kmer_start_indices,
                 kmer_comparison_func=kmer_comparison_func,
                 kmer_filter_func=kmer_filter_func,
+                kmer_info_func=get_kmer_info_minimal,
                 min_group_size=min_group_size,
                 max_group_size=max_group_size,
                 yield_first_n=yield_first_n,
             )
 
             # collect all items in the generator
-            kmer_nums_list = []
-            group_sizes = []
-            for kmer_nums, group_size in generator:
-                kmer_nums_list.append(kmer_nums)
-                group_sizes.append(group_size)
+            kmer_info = [list(row) for row in generator]
 
             # check that everything matches what is expected
-            expected_kmer_nums_list, expected_group_sizes = self.get_expected_group_kmers(
+            expected_kmer_info = self.get_expected_kmer_info_generator_output(
                 sorted_kmers, min_group_size, max_group_size, yield_first_n
             )
-            self.assertListEqual(kmer_nums_list, expected_kmer_nums_list)
-            self.assertListEqual(group_sizes, expected_group_sizes)
+            self.assertEqual(kmer_info, expected_kmer_info)
 
-    def test_kmer_nums_by_group_generator_comprehensive(self):
+    def test_kmer_info_by_group_generator_comprehensive(self):
         """
-        Comprehensive set of tests for kmer_nums_by_group_generator over seq_list_2 for varied
+        Comprehensive set of tests for kmer_info_by_group_generator over seq_list_2 for varied
         kmer lengths (variable kmer length is NOT tested).
 
         NOTE: This test could be expanded to greater parameters at the cost of run time.
@@ -1342,12 +1409,28 @@ class TestKmerGenerator(TestKmers):
         # run the tests
         for seq_list in seq_lists:
             for kmer_len in kmer_len_list:
-                self.run_single_kmer_nums_by_group_generator_test(seq_list, kmer_len)
+                self.run_single_kmer_info_by_group_generator_test(seq_list, kmer_len)
 
-    def test_kmer_nums_by_group_generator_01(self):
+    def test_kmer_info_by_group_generator_01(self):
         """
-        Test a single kmer_nums_by_group_generator instance
+        Test a single kmer_info_by_group_generator instance
         """
         seq_list = [("chr1", "ATCGAATTAG")]
         kmer_len = 1
-        self.run_single_kmer_nums_by_group_generator_test(seq_list, kmer_len)
+        self.run_single_kmer_info_by_group_generator_test(seq_list, kmer_len)
+
+    def test_get_kmer_info_minimal(self):
+        """
+        Test get_kmer_info_minimal numba jit function
+        """
+        kmer_num, group_size_yielded, group_size_total = get_kmer_info_minimal(
+            kmer_num=0,
+            kmer_sba_start_indices=None,
+            sba=None,
+            kmer_len=None,
+            group_size_yielded=1,
+            group_size_total=2,
+        )
+        self.assertEqual(kmer_num, 0)
+        self.assertEqual(group_size_yielded, 1)
+        self.assertEqual(group_size_total, 2)
