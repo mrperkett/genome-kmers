@@ -539,7 +539,91 @@ class Kmers:
         implementation and profiling
         """
 
-        pass
+    def generate_get_kmer_info_func(self, one_based_seq_index: bool) -> Callable:
+        """
+        Generate the get_kmer_info function that is used to get kmer information from a sequence
+        byte array index.
+
+        Args:
+            one_based_seq_index (bool): whether to return one-based sequence indices
+
+        Returns:
+            Callable: get_kmer_info
+        """
+
+        get_record_info_from_sba_index = self.seq_coll.generate_get_record_info_from_sba_index_func(
+            one_based_seq_index
+        )
+
+        @jit
+        def get_kmer_info(
+            kmer_num: int,
+            kmer_sba_start_indices: np.array,
+            sba: np.array,
+            kmer_len: Union[int, None],
+            group_size_yielded: int,
+            group_size_total: int,
+        ) -> tuple[int, str, str, int, int, int, int]:
+            """
+            Given the kmer_num, return all kmer info.
+
+            Args:
+                kmer_num (int): kmer number
+                kmer_sba_start_indices (np.array): sequence byte array start indices
+                sba (np.array): sequence byte array
+                kmer_len (Union[int, None]): length of kmer
+                group_size_yielded (int): total number of kmers in the group that will be yielded
+                group_size_total (int): total size of the group (including kmers not yielded)
+
+            Raises:
+                ValueError: kmer_num is invalid
+                ValueError: kmer_len is invalid
+
+            Returns:
+                tuple[int, str, str, int, int, int, int]:
+                    kmer_num,
+                    seq_strand,
+                    seq_chrom,
+                    seq_start_idx,
+                    kmer_len,
+                    group_size_yielded,
+                    group_size_total,
+            """
+            # verify that kmer_num is valid
+            if kmer_num < 0:
+                raise ValueError(f"kmer_num ({kmer_num}) cannot be less than zero")
+            if kmer_num >= len(kmer_sba_start_indices):
+                raise ValueError(
+                    f"kmer_num ({kmer_num}) is out of bounds (num kmers = {len(kmer_sba_start_indices)})"
+                )
+
+            # get record information given the kmer's sequence byte array index
+            sba_idx = kmer_sba_start_indices[kmer_num]
+            seg_num, seg_sba_start_idx, seg_sba_end_idx, seq_strand, seq_chrom, seq_start_idx = (
+                get_record_info_from_sba_index(sba_idx)
+            )
+
+            # if kmer_len is None, set it to the largest possible kmer
+            if kmer_len is None:
+                kmer_len = seg_sba_end_idx - sba_idx + 1
+            # otherwise, verify that kmer_len is in-bounds
+            else:
+                if sba_idx + kmer_len - 1 > seg_sba_end_idx:
+                    raise ValueError(
+                        f"kmer_len ({kmer_len}) for kmer_num ({kmer_num}) extends beyond the end of the segment"
+                    )
+
+            return (
+                kmer_num,
+                seq_strand,
+                seq_chrom,
+                seq_start_idx,
+                kmer_len,
+                group_size_yielded,
+                group_size_total,
+            )
+
+        return get_kmer_info
 
     def save_state(self, save_file_base, include_sequence_collection):
         """
@@ -559,12 +643,6 @@ class Kmers:
     def unique(self, kmer_len, inplace=False):
         """
         Discard repeated kmers keep only unique kmers.
-        """
-        pass
-
-    def count_unique(self, kmer_len):
-        """
-        Count the number of unique kmers
         """
         pass
 
