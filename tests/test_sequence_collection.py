@@ -1,9 +1,18 @@
+from bisect import bisect_right as builtin_bisect_right
+from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from genome_kmers.sequence_collection import SequenceCollection, reverse_complement_sba
+from genome_kmers.sequence_collection import (
+    SequenceCollection,
+    bisect_right,
+    get_forward_seq_idx,
+    get_sba_start_end_indices_for_segment,
+    get_segment_num_from_sba_index,
+    reverse_complement_sba,
+)
 
 
 class TestSequenceCollection:
@@ -302,7 +311,6 @@ class TestFastaInit(TestSequenceCollection):
 
     @pytest.fixture
     def mock_fasta_file_1(self, mocker):
-        # data = "\n".join([f">{record_name}\n{seq}" for record_name, seq in self.seq_list_1])
         data = self.fasta_str_1
         mocked_data = mocker.mock_open(read_data=data)
         mocker.patch("builtins.open", mocked_data)
@@ -336,7 +344,6 @@ class TestFastaInit(TestSequenceCollection):
         """
         Test sequence_list constructor with single chromosome
         """
-        # seq_coll = SequenceCollection(fasta_file_path=mock_fasta_1, strands_to_load="forward")
         seq_coll = SequenceCollection(
             fasta_file_path=Path("mock_path_to_file.fa"), strands_to_load="forward"
         )
@@ -683,9 +690,10 @@ class TestGetRecord(TestSequenceCollection):
         raise AssertionError("Could not get expected record num.  Logic error in helper function.")
 
     @staticmethod
-    def _test_get_record(seq_list, strands_to_load, sba_strand, expected_sba_seq_starts):
+    def run_single_get_record_test(seq_list, strands_to_load, sba_strand, expected_sba_seq_starts):
         """
-        Helper function to test
+        Helper function to test that get_segment_num_from_sba_index() and
+        get_record_name_from_sba_index() match what is expected
 
         Args:
             seq_list (_type_): _description_
@@ -745,7 +753,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_1, "forward")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_1, "forward", None, self.expected_forward_sba_seq_starts_1
         )
 
@@ -755,7 +763,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_1, "reverse_complement")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_1, "reverse_complement", None, self.expected_revcomp_sba_seq_starts_1
         )
 
@@ -765,7 +773,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_1, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="forward")
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_1, "both", "forward", self.expected_forward_sba_seq_starts_1
         )
 
@@ -775,7 +783,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_1, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="reverse_complement")
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_1, "both", "reverse_complement", self.expected_revcomp_sba_seq_starts_1
         )
 
@@ -785,7 +793,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_2, "forward")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_2, "forward", None, self.expected_forward_sba_seq_starts_2
         )
 
@@ -795,7 +803,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_2, "reverse_complement")
             get_record_num_from_sba_index(sba_idx, sba_strand=None)
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_2, "reverse_complement", None, self.expected_revcomp_sba_seq_starts_2
         )
 
@@ -805,7 +813,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_2, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="forward")
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_2, "both", "forward", self.expected_forward_sba_seq_starts_2
         )
 
@@ -815,7 +823,7 @@ class TestGetRecord(TestSequenceCollection):
             SequenceCollection(seq_list_2, "both")
             get_record_num_from_sba_index(sba_idx, sba_strand="reverse_complement")
         """
-        self._test_get_record(
+        self.run_single_get_record_test(
             self.seq_list_2, "both", "reverse_complement", self.expected_revcomp_sba_seq_starts_2
         )
 
@@ -865,6 +873,376 @@ class TestGetRecord(TestSequenceCollection):
 
 
 class TestGetRecordLoc(TestSequenceCollection):
+    """
+    Test SequenceCollection functionality related to retrieve record location information
+
+    Overview of test cases defined by expected_record_info, which uses self.seq_list_2 as input to
+    SequenceCollection initialization.
+
+    record_name:             chr1        chr2         chr3
+    record_num:              [0]         [1]          [2]
+    seg_num:                 [0]         [1]          [2]
+    1 based fwd seq idx: 1       10 1         12 1           13
+    fwd seq idx:         0        9 0         11 0           12
+    sba_idx:             0        9 11        22 24          36
+                         |        | |          | |           |
+    seq:                 ATCGAATTAG$GGATCTTGCATT$GTGATTGACCCCT
+    fwd tests:           +    +   + +  +       + +        +  +    = 9 total
+    revcomp tests:       +      +    + +   +      + +    +   +    = 9 total
+    revcomp:             AGGGGTCAATCAC$AATGCAAGATCC$CTAATTCGAT
+                         |           | |          | |        |
+    sba_idx:             0          12 14        25 27       36
+    fwd seq idx:         12          0 11         0 9        0
+    1 based fwd seq idx: 13          1 12         1 10       1
+    seg_num:                  [0]           [1]         [2]
+    record_num:               [2]           [1]         [0]
+    record_name:              chr3          chr2        chr1
+    """
+
+    fwd_seg_starts = np.array([0, 11, 24], dtype=int)
+    revcomp_seg_starts = np.array([0, 14, 27], dtype=int)
+    Record = namedtuple(
+        "Record",
+        [
+            "sba_idx",
+            "sba_strand",
+            "sba_seg_starts",
+            "len_sba",
+            "seg_num",
+            "sba_seg_start_idx",
+            "sba_seg_end_idx",
+            "one_based",
+            "seq_strand",
+            "seq_record_name",
+            "seq_start_idx",
+        ],
+    )
+    expected_record_info = []
+
+    # fwd test 01
+    expected_record_info.append(
+        Record(
+            sba_idx=0,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=9,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr1",
+            seq_start_idx=0,
+        )
+    )
+
+    # fwd test 02
+    expected_record_info.append(
+        Record(
+            sba_idx=5,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=9,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr1",
+            seq_start_idx=5,
+        )
+    )
+
+    # fwd test 03
+    expected_record_info.append(
+        Record(
+            sba_idx=9,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=9,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr1",
+            seq_start_idx=9,
+        )
+    )
+
+    # fwd test 04
+    expected_record_info.append(
+        Record(
+            sba_idx=11,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=11,
+            sba_seg_end_idx=22,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr2",
+            seq_start_idx=0,
+        )
+    )
+
+    # fwd test 05
+    expected_record_info.append(
+        Record(
+            sba_idx=14,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=11,
+            sba_seg_end_idx=22,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr2",
+            seq_start_idx=3,
+        )
+    )
+
+    # fwd test 06
+    expected_record_info.append(
+        Record(
+            sba_idx=22,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=11,
+            sba_seg_end_idx=22,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr2",
+            seq_start_idx=11,
+        )
+    )
+
+    # fwd test 07
+    expected_record_info.append(
+        Record(
+            sba_idx=24,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=24,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr3",
+            seq_start_idx=0,
+        )
+    )
+
+    # fwd test 08
+    expected_record_info.append(
+        Record(
+            sba_idx=33,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=24,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr3",
+            seq_start_idx=9,
+        )
+    )
+
+    # fwd test 09
+    expected_record_info.append(
+        Record(
+            sba_idx=36,
+            sba_strand="forward",
+            sba_seg_starts=fwd_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=24,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="+",
+            seq_record_name="chr3",
+            seq_start_idx=12,
+        )
+    )
+
+    # revcomp test 01
+    expected_record_info.append(
+        Record(
+            sba_idx=0,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=12,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr3",
+            seq_start_idx=12,
+        )
+    )
+
+    # revcomp test 02
+    expected_record_info.append(
+        Record(
+            sba_idx=7,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=12,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr3",
+            seq_start_idx=5,
+        )
+    )
+
+    # revcomp test 03
+    expected_record_info.append(
+        Record(
+            sba_idx=12,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=0,
+            sba_seg_start_idx=0,
+            sba_seg_end_idx=12,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr3",
+            seq_start_idx=0,
+        )
+    )
+
+    # revcomp test 04
+    expected_record_info.append(
+        Record(
+            sba_idx=14,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=14,
+            sba_seg_end_idx=25,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr2",
+            seq_start_idx=11,
+        )
+    )
+
+    # revcomp test 05
+    expected_record_info.append(
+        Record(
+            sba_idx=18,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=14,
+            sba_seg_end_idx=25,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr2",
+            seq_start_idx=7,
+        )
+    )
+
+    # revcomp test 06
+    expected_record_info.append(
+        Record(
+            sba_idx=25,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=1,
+            sba_seg_start_idx=14,
+            sba_seg_end_idx=25,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr2",
+            seq_start_idx=0,
+        )
+    )
+
+    # revcomp test 07
+    expected_record_info.append(
+        Record(
+            sba_idx=27,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=27,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr1",
+            seq_start_idx=9,
+        )
+    )
+
+    # revcomp test 08
+    expected_record_info.append(
+        Record(
+            sba_idx=32,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=27,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr1",
+            seq_start_idx=4,
+        )
+    )
+
+    # revcomp test 09
+    expected_record_info.append(
+        Record(
+            sba_idx=36,
+            sba_strand="reverse_complement",
+            sba_seg_starts=revcomp_seg_starts,
+            len_sba=37,
+            seg_num=2,
+            sba_seg_start_idx=27,
+            sba_seg_end_idx=36,
+            one_based=False,
+            seq_strand="-",
+            seq_record_name="chr1",
+            seq_start_idx=0,
+        )
+    )
+
+    # for each entry in expected_record_info, add corresponding entry for one_based=True
+    additional_records = []
+    for record in expected_record_info:
+        new_record = Record(
+            sba_idx=record.sba_idx,
+            sba_strand=record.sba_strand,
+            sba_seg_starts=record.sba_seg_starts,
+            len_sba=record.len_sba,
+            seg_num=record.seg_num,
+            sba_seg_start_idx=record.sba_seg_start_idx,
+            sba_seg_end_idx=record.sba_seg_end_idx,
+            one_based=True,
+            seq_strand=record.seq_strand,
+            seq_record_name=record.seq_record_name,
+            seq_start_idx=record.seq_start_idx + 1,
+        )
+        additional_records.append(new_record)
+    expected_record_info.extend(additional_records)
 
     def test_get_record_loc_from_sba_index_01(self):
         """
@@ -946,6 +1324,196 @@ class TestGetRecordLoc(TestSequenceCollection):
                 sba_idx, sba_strand="reverse_complement", one_based=True
             )
             assert record_loc == expected_record_loc
+
+    def test_bisect_right(self):
+        """
+        Test bisect_right @jit implementation against the Python builtin function
+        """
+        seg_starts = np.array([0, 11, 24], dtype=int)
+        for i in range(0, 25):
+            assert bisect_right(seg_starts, i) == builtin_bisect_right(seg_starts, i)
+
+    def test_get_forward_seq_idx(self):
+        """
+        Test get_forward_seq_idx @jit function following test cases outlined in the TestGetRecordLoc
+        class docstring.
+        """
+        params = [
+            ("forward", False),
+            ("forward", True),
+            ("reverse_complement", False),
+            ("reverse_complement", True),
+        ]
+        for strands_to_load, one_based in params:
+            # iterate through records verifying it matches expected values
+            for record in self.expected_record_info:
+                # skip records for a different sba_strand or one_based
+                if record.sba_strand != strands_to_load or record.one_based != one_based:
+                    continue
+
+                # get_forward_seq_idx()
+                fwd_seq_idx = get_forward_seq_idx(
+                    sba_idx=record.sba_idx,
+                    sba_strand=record.sba_strand,
+                    seg_sba_start_idx=record.sba_seg_start_idx,
+                    seg_sba_end_idx=record.sba_seg_end_idx,
+                    one_based=record.one_based,
+                )
+                assert fwd_seq_idx == record.seq_start_idx
+
+    def test_get_segment_num_from_sba_index(self):
+        """
+        Test get_segment_num_from_sba_index @jit function following test cases outlined in the
+        TestGetRecordLoc class docstring.
+        """
+        params = [
+            ("forward", False),
+            ("forward", True),
+            ("reverse_complement", False),
+            ("reverse_complement", True),
+        ]
+        for strands_to_load, one_based in params:
+            # iterate through records verifying it matches expected values
+            for record in self.expected_record_info:
+                # skip records for a different sba_strand or one_based
+                if record.sba_strand != strands_to_load or record.one_based != one_based:
+                    continue
+
+                # get_segment_num_from_sba_index()
+                seg_num = get_segment_num_from_sba_index(
+                    record.sba_idx, record.sba_strand, record.sba_seg_starts
+                )
+                assert seg_num == record.seg_num
+
+    def test_get_sba_start_end_indices_for_segment(self):
+        """
+        Test get_sba_start_end_indices_for_segment @jit function following test cases outlined in
+        the TestGetRecordLoc class docstring.
+        """
+        params = [
+            ("forward", False),
+            ("forward", True),
+            ("reverse_complement", False),
+            ("reverse_complement", True),
+        ]
+        for strands_to_load, one_based in params:
+            # iterate through records verifying it matches expected values
+            for record in self.expected_record_info:
+                # skip records for a different sba_strand or one_based
+                if record.sba_strand != strands_to_load or record.one_based != one_based:
+                    continue
+
+                # get_sba_start_end_indices_for_segment()
+                sba_start_index, sba_end_index = get_sba_start_end_indices_for_segment(
+                    record.seg_num, record.sba_strand, record.sba_seg_starts, record.len_sba
+                )
+                sba_start_index == record.sba_seg_start_idx
+                sba_end_index == record.sba_seg_end_idx
+
+    def test_generate_get_record_info_from_sba_index_func(self):
+        """
+        Test the get_record_info_from_sba_index @jit function that is generated by the
+        generate_get_record_info_from_sba_index_func member function following test cases outlined
+        in the TestGetRecordLoc class docstring.
+        """
+        params = [
+            ("forward", False),
+            ("forward", True),
+            ("reverse_complement", False),
+            ("reverse_complement", True),
+        ]
+        for strands_to_load, one_based in params:
+            # initialize sequence collection
+            seq_coll = SequenceCollection(
+                sequence_list=self.seq_list_2, strands_to_load=strands_to_load
+            )
+
+            # generate the get_record_info_from_sba_index function to test
+            get_record_info_from_sba_index = seq_coll.generate_get_record_info_from_sba_index_func(
+                one_based=one_based
+            )
+
+            # iterate through records verifying it matches expected values
+            for record in self.expected_record_info:
+                # skip records for a different sba_strand or one_based
+                if record.sba_strand != strands_to_load or record.one_based != one_based:
+                    continue
+
+                # get_record_info_from_sba_index()
+                (
+                    seg_num,
+                    seg_sba_start_idx,
+                    seg_sba_end_idx,
+                    seq_strand,
+                    seq_record_name,
+                    seq_start_idx,
+                ) = get_record_info_from_sba_index(record.sba_idx)
+
+                # verify all values meet expected
+                assert seg_num == record.seg_num
+                assert seg_sba_start_idx == record.sba_seg_start_idx
+                assert seg_sba_end_idx == record.sba_seg_end_idx
+                assert seq_strand == record.seq_strand
+                assert seq_record_name == record.seq_record_name
+                assert seq_start_idx == record.seq_start_idx
+
+    def test_generate_get_record_info_from_sba_index_func_error_fwd(self):
+        """
+        Test requesting sba_idx out of bounds to verify an exception is raised for forward strand
+        """
+        # initialize sequence collection
+        seq_coll = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+
+        # generate the get_record_info_from_sba_index function to test
+        get_record_info_from_sba_index = seq_coll.generate_get_record_info_from_sba_index_func(
+            one_based=False
+        )
+
+        # out of bounds before chr1
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(-1)
+
+        # boundary between chr1 and chr2
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(10)
+
+        # boundary between chr2 and chr3
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(23)
+
+        # out of bounds after chr3
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(37)
+
+    def test_generate_get_record_info_from_sba_index_func_error_revcomp(self):
+        """
+        Test requesting sba_idx out of bounds to verify an exception is raised for revcomp strand
+        """
+        # initialize sequence collection
+        seq_coll = SequenceCollection(
+            sequence_list=self.seq_list_2, strands_to_load="reverse_complement"
+        )
+
+        # generate the get_record_info_from_sba_index function to test
+        get_record_info_from_sba_index = seq_coll.generate_get_record_info_from_sba_index_func(
+            one_based=False
+        )
+
+        # out of bounds before chr3
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(-1)
+
+        # boundary between chr3 and chr2
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(13)
+
+        # boundary between chr2 and chr1
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(26)
+
+        # out of bounds after chr1
+        with pytest.raises(ValueError):
+            get_record_info_from_sba_index(37)
 
 
 class TestOtherMemberFunctions(TestSequenceCollection):
