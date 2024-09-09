@@ -1,12 +1,39 @@
-from bisect import bisect_right
+# from bisect import bisect_right
 from collections import Counter
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 import numpy as np
 from numba import jit
 from numba.core import types
 from numba.typed import Dict
+
+
+@jit
+def bisect_right(a, x):
+    """
+    NOTE: this is a minor modification to the copy and paste from the python standard library. It
+    is not possible to use the python standard library version with the @jit decorator, which is
+    required since functions that call this function need to use the @jit decorator.
+
+    Return the index where to insert item x in list a, assuming a is sorted.
+
+    The return value i is such that all e in a[:i] have e <= x, and all e in
+    a[i:] have e > x.  So if x already appears in the list, a.insert(i, x) will
+    insert just after the rightmost x already there.
+
+    Optional args lo (default 0) and hi (default len(a)) bound the
+    slice of a to be searched.
+    """
+    lo = 0
+    hi = len(a)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if x < a[mid]:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
 
 
 @jit
@@ -43,6 +70,120 @@ def reverse_complement_sba(
     return reverse_complement_arr
 
 
+@jit
+def get_segment_num_from_sba_index(sba_idx: int, sba_strand: str, sba_seg_starts: np.array) -> int:
+    """
+    Get the segment number from the sequence byte array index.
+
+    Args:
+        sba_idx (int): sequence byte array index
+        sba_strand (str): "forward" or "reverse_complement"
+        sba_seg_starts (np.array): sba indices for each segment start (dtype=np.unit32)
+
+    Returns:
+        int: segment_num
+    """
+    # NOTE: if this is too slow in profiling, an alternative implementation is to generate a
+    # look-up table that takes O(1) average look-up time if the distribution of sequence lengths
+    # isn't too wide. Define an array of length (sba_len / N) and populate each index
+    # (sba_idx // N) with the sba_idx.  Choose N to be small enough to ensure O(1) lookup time.
+    # Will have bad memory usage in worst case (e.g. 1 length 1e7, 1e7 of length 1)
+
+    # use a @jit decorated copy of Python's bisect function to do O(log(N)) search for the correct
+    # record number using
+    return bisect_right(sba_seg_starts, sba_idx) - 1
+
+
+@jit
+def get_forward_seq_idx(
+    sba_idx: int,
+    sba_strand: str,
+    seg_sba_start_idx: int,
+    seg_sba_end_idx: int,
+    one_based: bool = False,
+) -> int:
+    """
+    Get the forward sequence index given a sequence byte array index and segment start and and
+    indices. Optionally returns a one-based sequence index.
+
+    Args:
+        sba_idx (int): sequence byte array index
+        sba_strand (str, optional): sequence byte array strand.  If strands_loaded  is
+            "both", then it must be specified as forward" or "reverse_complement".  Otherwise it
+            is inferred. Defaults to None.
+        seg_sba_start_idx (int): sequence byte array index for the start of the segment
+        seg_sba_end_idx (int): sequence byte array index for the of the segment
+        one_based (bool, optional): whether seq index return be one-based. Defaults to False.
+
+    Raises:
+        ValueError: if sba_idx, seg_sba_start_idx, or seg_sba_end_idx is not valid
+        ValueError: if sba_strand is not recognized
+
+    Returns:
+        int: sequence forward strand index
+    """
+    # check that sba_idx, seg_sba_start_idx, and seg_sba_end_idx are valid
+    if sba_idx < seg_sba_start_idx:
+        raise ValueError(f"sba_idx ({sba_idx}) must be >= seg_sba_start_idx ({seg_sba_start_idx})")
+    if sba_idx > seg_sba_end_idx:
+        raise ValueError(f"sba_idx ({sba_idx}) must be <= seg_end_start_idx ({seg_sba_end_idx})")
+    if seg_sba_start_idx > seg_sba_end_idx:
+        raise ValueError(
+            f"seg_sba_start_idx ({seg_sba_start_idx}) must be <= seg_sba_end_idx ({seg_sba_end_idx})"
+        )
+    if seg_sba_start_idx < 0:
+        raise ValueError(f"seg_sba_start_idx ({seg_sba_start_idx}) must be > 0")
+
+    # calculate seq_idx
+    if sba_strand == "forward":
+        seq_idx = sba_idx - seg_sba_start_idx
+    elif sba_strand == "reverse_complement":
+        seq_idx = seg_sba_end_idx - sba_idx
+    else:
+        raise ValueError(f"sba_strand ({sba_strand}) not recognized")
+
+    # add one if one_based
+    if one_based:
+        seq_idx += 1
+
+    return seq_idx
+
+
+@jit
+def get_sba_start_end_indices_for_segment(
+    segment_num: int, sba_strand: str, sba_seg_starts: np.array, len_sba: int
+) -> tuple[int, int]:
+    """
+    Given a segment number (and optionally sba_strand), return the first sba index and last sba
+    index of the segment.
+
+    Args:
+        segment_num (int): segment number
+        sba_strand (str, optional): sequence byte array strand ("forward", "reverse_complement",
+            or "both"). Defaults to None.
+
+    Raises:
+        ValueError: segment_num out of bounds
+
+    Returns:
+        tuple[int, int]: sba_start_index, sba_end_index
+    """
+    # verify segment_num is valid
+    if segment_num < 0:
+        raise ValueError(f"segment_num ({segment_num}) is out of bounds")
+    elif segment_num >= len(sba_seg_starts):
+        raise ValueError(f"segment_num ({segment_num}) is out of bounds")
+
+    # get start_index
+    sba_start_index = sba_seg_starts[segment_num]
+    if segment_num == len(sba_seg_starts) - 1:
+        sba_end_index = len_sba - 1
+    else:
+        sba_end_index = sba_seg_starts[segment_num + 1] - 2
+
+    return sba_start_index, sba_end_index
+
+
 class SequenceCollection:
     """
     Holds all the information contained within a fasta file in a format conducive to
@@ -58,7 +199,7 @@ class SequenceCollection:
         record: each header and its corresponding sequence is called a record.  record_num is based on
             the order that records are read in.  record_num does not change when reverse
             complemented
-        segement: is the same as a record except that segment_num always starts leftmost.  i.e. the
+        segment: is the same as a record except that segment_num always starts leftmost.  i.e. the
             sba end index for segment N is always less than the sba end index for segment M > N
         forward_sba_idx: index in forward sequence byte array
         revcomp_sba_idx: index in reverse complement sequence byte array
@@ -241,23 +382,23 @@ class SequenceCollection:
         Yield:
             (record_name, record_sba_start_idx, record_sba_end_idx)
         """
-        # decide which strand to used based on user parameter
+        # decide which strand to use based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
         if sba_strand == "forward":
             for segment_num in range(len(self)):
                 record_name = self.forward_record_names[segment_num]
-                sba_seg_start_idx = self._forward_sba_seg_starts[segment_num]
-                sba_seg_end_idx = self._get_seg_end_idx(segment_num, sba_strand)
-
+                sba_seg_start_idx, sba_seg_end_idx = get_sba_start_end_indices_for_segment(
+                    segment_num, sba_strand, self._forward_sba_seg_starts, len(self.forward_sba)
+                )
                 yield (record_name, sba_seg_start_idx, sba_seg_end_idx)
         elif sba_strand == "reverse_complement":
             # iterate in opposite order of segments to maintain correct record_num ordering
             for segment_num in range(len(self) - 1, -1, -1):
                 record_name = self.revcomp_record_names[segment_num]
-                sba_seg_start_idx = self._revcomp_sba_seg_starts[segment_num]
-                sba_seg_end_idx = self._get_seg_end_idx(segment_num, sba_strand)
-
+                sba_seg_start_idx, sba_seg_end_idx = get_sba_start_end_indices_for_segment(
+                    segment_num, sba_strand, self._revcomp_sba_seg_starts, len(self.revcomp_sba)
+                )
                 yield (record_name, sba_seg_start_idx, sba_seg_end_idx)
         else:
             raise ValueError(f"sba_strand ({sba_strand}) must be 'forward' or 'reverse_complement'")
@@ -788,85 +929,6 @@ class SequenceCollection:
         )
         return opposite_strand_start_indices
 
-    def _get_seg_end_idx(self, segment_num: int, sba_strand: str) -> int:
-        """
-        Given the segement number and sequence byte array strand, return the (inclusive) end index
-
-        Args:
-            segment_num (int): segment number
-            sba_strand (str): sequence byte array strand for segment number.  Must be "forward"
-                or "reverse_complement"
-
-        Raises:
-            ValueError: if sba strand is not recognized
-
-        Returns:
-            int: segement end index (inclusive)
-        """
-        if sba_strand == "forward":
-            sba = self.forward_sba
-            sba_seg_starts = self._forward_sba_seg_starts
-        elif sba_strand == "reverse_complement":
-            sba = self.revcomp_sba
-            sba_seg_starts = self._revcomp_sba_seg_starts
-        else:
-            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
-
-        if segment_num == len(self) - 1:
-            # for the last segment, the end index is the last index of the sba
-            sba_segment_end_idx = len(sba) - 1
-        else:
-            # for other segments, the end index is the start of the next segment - 2 (accounting
-            # for the "$" separating sequences)
-            sba_segment_end_idx = sba_seg_starts[segment_num + 1] - 2
-        return sba_segment_end_idx
-
-    def _get_forward_seq_idx_from_sba_idx(
-        self,
-        sba_idx: int,
-        segment_num: int = None,
-        sba_strand: str = None,
-        one_based: bool = False,
-    ) -> int:
-        """
-        Get the forward sequence index given a sequence byte array index.  If not provided, the
-        segment number will be calculated to determine to which record it belongs.  Optionally
-        returns a one-based sequence index.
-
-        Args:
-            sba_idx (int): sequence byte array index
-            segment_num (int, optional): segment number. Defaults to None.
-            sba_strand (str, optional): sequence byte array strand.  If strands_loaded  is
-                "both", then it must be specified as forward" or "reverse_complement".  Otherwise it
-                is inferred. Defaults to None.
-            one_based (bool, optional): whether seq index return be one-based. Defaults to False.
-
-        Raises:
-            ValueError: if sba_strand is not recognized
-
-        Returns:
-            int: sequence forward strand index
-        """
-        # decide which strand to used based on user parameter
-        sba_strand = self._get_sba_strand_to_use(sba_strand)
-
-        # if it hasn't been defined
-        if segment_num is None:
-            segment_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
-
-        if sba_strand == "forward":
-            seq_idx = sba_idx - self._forward_sba_seg_starts[segment_num]
-        elif sba_strand == "reverse_complement":
-            sba_segment_end_idx = self._get_seg_end_idx(segment_num, sba_strand)
-            seq_idx = sba_segment_end_idx - sba_idx
-        else:
-            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
-
-        if one_based:
-            seq_idx += 1
-
-        return seq_idx
-
     def get_record_loc_from_sba_index(
         self, sba_idx: int, sba_strand: str = None, one_based: bool = False
     ) -> tuple[str, str, int]:
@@ -886,22 +948,33 @@ class SequenceCollection:
         Returns:
             tuple[str, str, int]: _description_
         """
-        # decide which strand to used based on user parameter
+        # decide which strand to use based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
         # get all loc info
-        segement_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
-
         if sba_strand == "forward":
-            record_name = self.forward_record_names[segement_num]
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._forward_sba_seg_starts
+            )
+            record_name = self.forward_record_names[segment_num]
+            seg_sba_start_idx, seg_sba_end_idx = get_sba_start_end_indices_for_segment(
+                segment_num, sba_strand, self._forward_sba_seg_starts, len(self.forward_sba)
+            )
         elif sba_strand == "reverse_complement":
-            record_name = self.revcomp_record_names[segement_num]
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._revcomp_sba_seg_starts
+            )
+            record_name = self.revcomp_record_names[segment_num]
+            seg_sba_start_idx, seg_sba_end_idx = get_sba_start_end_indices_for_segment(
+                segment_num, sba_strand, self._revcomp_sba_seg_starts, len(self.revcomp_sba)
+            )
         else:
             raise ValueError(f"sba_strand ({sba_strand}) not recognized")
 
-        seq_idx = self._get_forward_seq_idx_from_sba_idx(
-            sba_idx, segement_num, sba_strand, one_based
+        seq_idx = get_forward_seq_idx(
+            sba_idx, sba_strand, seg_sba_start_idx, seg_sba_end_idx, one_based=one_based
         )
+
         strand = "+" if sba_strand == "forward" else "-"
 
         return (strand, record_name, seq_idx)
@@ -921,43 +994,23 @@ class SequenceCollection:
         Returns:
             record_name (str):
         """
-        # decide which strand to used based on user parameter
+        # decide which strand to use based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
-        segement_num = self.get_segment_num_from_sba_index(sba_idx, sba_strand)
         if sba_strand == "forward":
-            record_name = self.forward_record_names[segement_num]
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._forward_sba_seg_starts
+            )
+            record_name = self.forward_record_names[segment_num]
         elif sba_strand == "reverse_complement":
-            record_name = self.revcomp_record_names[segement_num]
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._revcomp_sba_seg_starts
+            )
+            record_name = self.revcomp_record_names[segment_num]
         else:
             raise ValueError(f"sba_strand ({sba_strand}) not recognized")
 
         return record_name
-
-    @staticmethod
-    def _get_segment_num_from_sba_index(sba_seg_starts: np.array, sba_idx: int) -> int:
-        """
-        Get the segment number from the sequence byte array index.
-
-        NOTE: no checking of argument values is done in this function.  If checking is required, it
-        should be done through the wrapper function get_record_num_from_sba_idx.
-
-        Args:
-            sba_seg_starts (np.array): sba indices for each segements start (dtype=np.unit32)
-            sba_idx (int): sequence byte array index
-
-        Returns:
-            segement_num (int):
-        """
-        # TODO: if this is too slow in profiling, an alternative implementation is to generate a
-        # look-up table that takes O(1) average look-up time if the distribution of sequence lengths
-        # isn't too wide. Define an array of length (sba_len / N) and populate each index
-        # (sba_idx // N) with the sba_idx.  Choose N to be small enough to ensure O(1) lookup time.
-        # Will have bad memory usage in worst case (e.g. 1 length 1e7, 1e7 of length 1)
-
-        # use Python's bisect function to do O(log(N)) search for the correct record number using
-        # _forward_sba_seg_starts or _revcomp_sba_seg_starts
-        return bisect_right(sba_seg_starts, sba_idx) - 1
 
     def _get_sba_strand_to_use(self, sba_strand: str) -> str:
         # sba_strand only needs to be specified for self._strands_loaded == "both".  If provided
@@ -997,21 +1050,21 @@ class SequenceCollection:
         Returns:
             segment_num (int):
         """
-        # decide which strand to used based on user parameter
+        # decide which strand to use based on user parameter
         sba_strand = self._get_sba_strand_to_use(sba_strand)
 
-        # get the segement number
+        # get the segment number
         if sba_strand == "forward":
             if sba_idx < 0 or sba_idx >= len(self.forward_sba):
                 raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
-            segment_num = SequenceCollection._get_segment_num_from_sba_index(
-                self._forward_sba_seg_starts, sba_idx
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._forward_sba_seg_starts
             )
         elif sba_strand == "reverse_complement":
             if sba_idx < 0 or sba_idx >= len(self.revcomp_sba):
                 raise IndexError(f"sba_idx ({sba_idx}) is out of bounds")
-            segment_num = SequenceCollection._get_segment_num_from_sba_index(
-                self._revcomp_sba_seg_starts, sba_idx
+            segment_num = get_segment_num_from_sba_index(
+                sba_idx, sba_strand, self._revcomp_sba_seg_starts
             )
 
         return segment_num
@@ -1058,3 +1111,79 @@ class SequenceCollection:
             sba_end_index = sba_seg_starts[segment_num + 1] - 2
 
         return sba_start_index, sba_end_index
+
+    def generate_get_record_info_from_sba_index_func(self, one_based: bool = False) -> Callable:
+        """
+        Generate a function that returns record info when provided a sequence byte array index
+
+        Args:
+            one_based (bool, optional): Should sequence indices by one based. Defaults to False.
+
+        Raises:
+            ValueError: sba_strand not recognized
+
+        Returns:
+            Callable: get_record_info_from_sba_index
+        """
+        # NOTE: below, record_names is caste into a tuple to avoid the following numba error
+        #   Exception has occurred: NumbaNotImplementedError       (note: full exception trace is shown but execution is paused at: <module>)
+        #   Failed in nopython mode pipeline (step: native lowering)
+        #   <numba.core.base.OverloadSelector object at 0x7f4e9cf54880>, (List(unicode_type, True),)
+
+        sba_strand = self._get_sba_strand_to_use(self.strands_loaded())
+
+        # set record_names, sba_seg_starts, seq_strand
+        if sba_strand == "forward":
+            record_names = tuple(self.forward_record_names)
+            sba_seg_starts = self._forward_sba_seg_starts
+            seq_strand = "+"
+            len_sba = len(self.forward_sba)
+        elif sba_strand == "reverse_complement":
+            record_names = tuple(self.revcomp_record_names)
+            sba_seg_starts = self._revcomp_sba_seg_starts
+            seq_strand = "-"
+            len_sba = len(self.revcomp_sba)
+        else:
+            raise ValueError(f"sba_strand ({sba_strand}) not recognized")
+
+        @jit
+        def get_record_info_from_sba_index(sba_idx: int) -> tuple[int, int, str, str, int]:
+            """
+            Given a sequence byte array index, return record info.
+
+            Args:
+                sba_idx (int): sequence byte array index
+
+            Raises:
+                ValueError: _description_
+
+            Returns:
+                tuple[int, int, str, str, int]:
+                    seg_sba_start_idx, seg_sba_end_idx, seq_strand, seq_record_name, seq_start_idx
+            """
+            # get the segment number that contains sba_idx
+            seg_num = get_segment_num_from_sba_index(sba_idx, sba_strand, sba_seg_starts)
+
+            # get the segment start and end indices in the sequence byte array
+            seg_sba_start_idx, seg_sba_end_idx = get_sba_start_end_indices_for_segment(
+                seg_num, sba_strand, sba_seg_starts, len_sba
+            )
+
+            # get the sequence index (on the forward strand)
+            seq_start_idx = get_forward_seq_idx(
+                sba_idx, sba_strand, seg_sba_start_idx, seg_sba_end_idx, one_based=one_based
+            )
+
+            # get record name
+            seq_record_name = record_names[seg_num]
+
+            return (
+                seg_num,
+                seg_sba_start_idx,
+                seg_sba_end_idx,
+                seq_strand,
+                seq_record_name,
+                seq_start_idx,
+            )
+
+        return get_record_info_from_sba_index
