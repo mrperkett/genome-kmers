@@ -294,6 +294,8 @@ def kmer_info_by_group_generator(
             )
 
     return
+
+
 class Kmers:
     """
     Defines memory-efficient kmers calculations on a genome.
@@ -514,30 +516,130 @@ class Kmers:
     def __getitem__(self):
         pass
 
-    def kmer_generator(self, kmer_len, fields=["kmer"], unique_only=False):
+    def get_kmers(
+        self,
+        kmer_len: Union[int, None],
+        one_based_seq_index: bool = False,
+        kmer_filter_func: Callable = kmer_filter_keep_all,
+        kmer_info_to_yield: str = "minimum",
+        min_group_size: int = 1,
+        max_group_size: Union[int, None] = None,
+        yield_first_n: Union[int, None] = None,
+    ) -> Generator[tuple, None, None]:
         """
-        Defines a generator that yields tuples with the requested information about
-        each kmer
+        A customizable generator yielding tuples with all kmer information.
+
+        Examples:
+
+        Yield all kmers
+        kmers.get_kmers(yield_first_n=None)
+
+        Yield only the first occurrence of a kmer
+        kmers.get_kmers(use yield_first_n=1)
+
+        Yield up to the first 10 occurrences of a kmer
+        kmers.get_kmers(use yield_first_n=10)
+
+        Yield all kmers that occur exactly once
+        kmers.get_kmers(max_group_size=1)
+
+        Yield all kmers that are repeated at least 5 times and no more than 10 times
+        kmers.get_kmers(min_group_size=5, max_group_size=10)
+
+        NOTE: group yielding is not supported if kmers are unsorted. The user cannot provide
+        min_group_size, max_group_size, or yield_first_n in this situation.
 
         Args:
-            kmer_len: size of kmer to yield
+            kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+            one_based_seq_index (bool, optional): whether yielded sequence indices should be
+                1-based. Defaults to False.
+            kmer_filter_func (Callable, optional): function that returns true if a kmer passes all
+                filters. Defaults to kmer_filter_keep_all.
+            kmer_info_to_yield (str): "minimum" or "full". Defaults to "minimum"
+            min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
+            max_group_size (Union[int, None], optional): Largest allowed group size.  If None, then
+                there is no maximum group size. Defaults to None.
+            yield_first_n (Union[int, None], optional): yield up to this many kmer_nums. Defaults to
+                None.
+        Raises:
+            NotImplementedError: if kmer_source_strand and seq_coll.strands() loaded are not both
+                "forward"
+            ValueError: kmer_len is invalid
+            ValueError: one or more group params are invalid (min_group_size, max_group_size,
+                yield_first_n)
+            ValueError: kmer_comparison_func is provided when kmers have not been sorted
 
-        Allowed Fields:
-            kmer_num
-            kmer
-            reverse_complement_kmer
-            canonical_kmer
-            is_canonical_kmer
-            record_num
-            record_name
-            record_seq_forward_start_idx
-            record_seq_forward_end_idx
-            kmer_count
-            NOTE: only allowed if unique_only is True
-
-        NOTE: I'm worried about performance, I would recommend a simple initial
-        implementation and profiling
+        Yields:
+            Generator[tuple, None, None]: output depends on get_kmer_info_func
         """
+
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # verify that kmer_len is valid
+        if kmer_len is not None and kmer_len < 1:
+            raise ValueError(f"kmer_len ({kmer_len}) must be > 0")
+
+        # verify that if kmers has not been sorted, that group arguments have not been provided
+        if not self._is_sorted:
+            if min_group_size != 1:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. min_group_size ({min_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+            if max_group_size is not None:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. max_group_size ({max_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+            if yield_first_n is not None:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. yield_first_n ({yield_first_n}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+
+        # set kmer_comparison_func
+        if self._is_sorted:
+            kmer_comparison_func = get_compare_sba_kmers_func(kmer_len)
+        else:
+            kmer_comparison_func = compare_sba_kmers_always_less_than
+
+        # set get_kmer_info_func
+        if kmer_info_to_yield == "minimum":
+            get_kmer_info_func = get_kmer_info_minimal
+        elif kmer_info_to_yield == "full":
+            get_kmer_info_func = self.generate_get_kmer_info_func(one_based_seq_index)
+        else:
+            raise ValueError(f"kmer_info_to_yield ({kmer_info_to_yield}) not recognized")
+
+        # collect values to pass to kmer_info_generator
+        sba = self.seq_coll.forward_sba
+        sba_strand = self.seq_coll.strands_loaded()
+        kmer_start_indices = self.kmer_sba_start_indices
+
+        # initialize the kmer info generator
+        kmer_generator = kmer_info_by_group_generator(
+            sba,
+            sba_strand,
+            kmer_len,
+            kmer_start_indices,
+            kmer_comparison_func,
+            kmer_filter_func,
+            get_kmer_info_func,
+            min_group_size,
+            max_group_size,
+            yield_first_n,
+        )
+
+        for kmer_info in kmer_generator:
+            yield kmer_info
+
+        return
 
     def generate_get_kmer_info_func(self, one_based_seq_index: bool) -> Callable:
         """
@@ -646,7 +748,35 @@ class Kmers:
         """
         pass
 
-    def get_kmer(self, kmer_num: int, kmer_len: Union[int, None] = None) -> str:
+    def get_kmer_str_no_checks(self, kmer_num: int, kmer_strand: str, kmer_len: int) -> str:
+        """
+        Return a string representation of kmer_num on kmer_strand with kmer_len. No checks to verify
+        that arguments provided are done. Only call this function if it is known that these checks
+        have already been completed (e.g. when yielded get_kmers()).
+
+        Args:
+            kmer_num (int): kmer number
+            kmer_strand (str): "+" or "-"
+            kmer_len (int): length of the kmer
+
+        Raises:
+            NotImplementedError: kmer_strand != "+"
+            ValueError: unrecognized kmer_strand
+
+        Returns:
+            str: kmer_str
+        """
+        if kmer_strand == "+":
+            sba = self.seq_coll.forward_sba
+            sba_start_idx = self.kmer_sba_start_indices[kmer_num]
+        elif kmer_strand == "-":
+            raise NotImplementedError("Only implemented for kmer_strand='+'")
+        else:
+            raise ValueError(f"kmer_strand ({kmer_strand}) not recognized")
+
+        return bytearray(sba[sba_start_idx : sba_start_idx + kmer_len]).decode("utf-8")
+
+    def get_kmer_str(self, kmer_num: int, kmer_len: Union[int, None] = None) -> str:
         """
         Get the kmer_num'th kmer of kmer_len.
 
