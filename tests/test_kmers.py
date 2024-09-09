@@ -490,7 +490,7 @@ class TestSort(TestKmers):
         assert len(kmers) == len(sorted_kmers)
         for kmer_num in range(len(kmers)):
             expected_kmer = sorted_kmers[kmer_num]
-            kmer = kmers.get_kmer(kmer_num)
+            kmer = kmers.get_kmer_str(kmer_num)
             assert kmer == expected_kmer
 
         return
@@ -522,7 +522,7 @@ class TestSort(TestKmers):
         assert len(kmers) == len(sorted_kmers)
         for kmer_num in range(len(kmers)):
             expected_kmer = sorted_kmers[kmer_num]
-            kmer = kmers.get_kmer(kmer_num)
+            kmer = kmers.get_kmer_str(kmer_num)
             assert kmer == expected_kmer
 
         return
@@ -1296,7 +1296,7 @@ class TestKmerGenerator(TestKmers):
                 if len(full_kmer) < kmer_len:
                     continue
                 expected_kmer = full_kmer[:kmer_len]
-                kmer = kmers.get_kmer(kmer_num, kmer_len)
+                kmer = kmers.get_kmer_str(kmer_num, kmer_len)
                 assert kmer == expected_kmer
 
         return
@@ -1568,3 +1568,47 @@ class TestKmerGenerator(TestKmers):
         assert kmer_len == kmer_len_to_use
         assert group_size_yielded == group_size_yielded_to_use
         assert group_size_total == group_size_total_to_use
+
+    def test_get_kmers_fwd(self):
+        """
+        Test the get_kmers() member function for forward strand kmers using self.seq_list_2.
+        Check that get_kmers() for 3-mers exactly matches expected kmer string output.
+        """
+
+        # get expected results
+        seq_list = self.seq_list_2
+        kmer_len = 3
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        seq_coll, unsorted_kmer_indices, unsorted_kmers, sorted_kmers, sorted_kmer_indices = (
+            self.get_expected_kmers(seq_list, min_kmer_len, max_kmer_len)
+        )
+
+        # build kmers
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+
+        # check that unsorted kmers match what is expected
+        kmer_strs = []
+        for kmer_info in kmers.get_kmers(kmer_len=kmer_len, kmer_info_to_yield="full"):
+            kmer_num = kmer_info[0]
+            kmer_strand = kmer_info[1]
+            this_kmer_len = kmer_info[4]
+            kmer_str = kmers.get_kmer_str_no_checks(kmer_num, kmer_strand, this_kmer_len)
+            kmer_strs.append(kmer_str)
+        assert kmer_strs == unsorted_kmers
+
+        # check that sorted kmers match what is expected
+        kmers.sort()
+        kmer_strs = []
+        for kmer_info in kmers.get_kmers(kmer_len=kmer_len, kmer_info_to_yield="full"):
+            kmer_num = kmer_info[0]
+            kmer_strand = kmer_info[1]
+            this_kmer_len = kmer_info[4]
+            kmer_str = kmers.get_kmer_str_no_checks(kmer_num, kmer_strand, this_kmer_len)
+            kmer_strs.append(kmer_str)
+        assert kmer_strs == sorted_kmers
