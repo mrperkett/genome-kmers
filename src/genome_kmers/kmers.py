@@ -13,8 +13,195 @@ def kmer_filter_keep_all(sba: np.array, sba_strand: str, kmer_sba_start_idx: int
     return True
 
 
+def gen_kmer_length_filter_func(min_kmer_len: int) -> Callable:
+    """
+    Generates a filter that passes if kmer is of min_kmer_len, but otherwise fails.
+
+    Args:
+        min_kmer_len (int): minimum required kmer length
+
+    Returns:
+        Callable: filter
+    """
+
+    @jit
+    def filter(sba: np.array, sba_strand: str, kmer_sba_start_idx: int) -> bool:
+        return kmer_has_required_len(sba, kmer_sba_start_idx, min_kmer_len)
+
+    return filter
+
+
+def gen_kmer_homopolymer_filter_func(max_homopolymer_size: int, kmer_len: int) -> Callable:
+    """
+    Generate a filter function that passes if there is no homopolym of length greater than
+    max_homopolymer_size.
+
+    NOTE: this function does not do extra checks to ensure that the kmer itself is valid (i.e. it
+    does overflow over a boundary or beyond the sequence byte array, is made of valid bases, etc).
+
+    Args:
+        max_homopolymer_size (int): largest allowed homopolymer.  Must be >= 1
+        kmer_len (int): length of kmer
+
+    Raises:
+        ValueError: max_homopolymer_size must be >= 2
+
+    Returns:
+        Callable: filter
+    """
+    # verify that max_homopolymer is valid
+    if max_homopolymer_size < 1:
+        raise ValueError(f"max_homopolymer_size ({max_homopolymer_size}) must be >= 1")
+
+    # verify that kmer_len is valid
+    if kmer_len < 1:
+        raise ValueError(f"kmer_len ({kmer_len}) must be >= 1")
+
+    @jit
+    def filter(sba: np.array, sba_strand: str, kmer_sba_start_idx: int):
+        # verify that a kmer starting at kmer_sba_start_idx and of length kmer_len does not overflow
+        if kmer_sba_start_idx + kmer_len - 1 >= len(sba):
+            raise ValueError(
+                f"The kmer_len ({kmer_len}) requested is too large for kmer_sba_start_idx ({kmer_sba_start_idx})"
+            )
+
+        # if the length of the kmer is less than the max allowed homopolymer, we don't need to do
+        # any checks
+        if kmer_len < max_homopolymer_size:
+            return True
+
+        # iterate base by base counting up the homopolymer size
+        homopolymer_size = 1
+        for kmer_idx in range(1, kmer_len):
+            sba_idx = kmer_sba_start_idx + kmer_idx
+            base = sba[sba_idx]
+            prev_base = sba[sba_idx - 1]
+
+            if base == ord("$"):
+                raise ValueError(
+                    f"The kmer_len ({kmer_len}) requested is too large for kmer_sba_start_idx ({kmer_sba_start_idx})"
+                )
+
+            # if part of a homopolymer, increment homopolymer_size
+            if base == prev_base:
+                homopolymer_size += 1
+                # if homopolymer size has exceeded the max, return False
+                if homopolymer_size > max_homopolymer_size:
+                    return False
+            # otherwise, reset
+            else:
+                homopolymer_size = 1
+
+        return True
+
+    return filter
+
+
+def gen_kmer_gc_content_filter_func(
+    min_allowed_gc_frac: float,
+    max_allowed_gc_frac: float,
+    kmer_len: int,
+) -> Callable:
+    """
+    Generate a filter function that returns True if fraction GC content is between
+    min_allowed_gc_frac and max_allowed_gc_frac.
+
+    NOTE: this function does not do extra checks to ensure that the kmer itself is valid (i.e. it
+    does overflow over a boundary or beyond the sequence byte array, is made of valid bases, etc).
+
+    Args:
+        min_allowed_gc_frac (float): minimum allowed fraction GC content (inclusive). Must be in
+            the range [0.0, 1.0] and be <= max_allowed_gc_frac.
+        max_allowed_gc_frac (float): maximum allowed fraction GC content (inclusive). Must be in
+            the range [0.0, 1.0] and be >= min_allowed_gc_frac.
+        kmer_len (int): length of kmer
+
+    Raises:
+        ValueError: min_allowed_gc_frac or max_allowed_gc_frac is invalid
+
+    Returns:
+        Callable: filter
+    """
+    # check that min and max_allowed_gc_frac are valid
+    if min_allowed_gc_frac > max_allowed_gc_frac:
+        raise ValueError(
+            f"min_allowed_gc_frac ({min_allowed_gc_frac}) must be <= max_allowed_gc_frac ({max_allowed_gc_frac})"
+        )
+    if min_allowed_gc_frac < 0.0 or min_allowed_gc_frac > 1.0:
+        raise ValueError(
+            f"min_allowed_gc_frac ({min_allowed_gc_frac}) must be in the range [0.0, 1.0]"
+        )
+    if max_allowed_gc_frac < 0.0 or max_allowed_gc_frac > 1.0:
+        raise ValueError(
+            f"max_allowed_gc_frac ({max_allowed_gc_frac}) must be in the range [0.0, 1.0]"
+        )
+
+    # calculate the min and max GC counts allowed
+    min_allowed_gc_count = int(np.ceil(kmer_len * min_allowed_gc_frac))
+    max_allowed_gc_count = int(np.floor(kmer_len * max_allowed_gc_frac))
+
+    # store values for "G" and "C"
+    g_val = ord("G")
+    c_val = ord("C")
+
+    @jit
+    def filter(sba: np.array, sba_strand: str, kmer_sba_start_idx: int):
+        # if it's not possible to meet the fraction requirements, return False
+        #
+        # Example of the edge case where two fractions are so close that it's not possible to meet
+        # the requirements
+        #   kmer_len = 16
+        #   min_allowed_gc_count = 0.13
+        #   max_allowed_gc_count= 0.18
+        #
+        #   0.18 * 16 = 2.88
+        #   min_allowed_gc_count = ceil(0.13 * 16)
+        #                        = ceil(2.08)
+        #                        = 3
+        #   max_allowed_gc_count = floor(0.18 * 16)
+        #                        = floor(2.88)
+        #                        = 2
+        if max_allowed_gc_count < min_allowed_gc_count:
+            return False
+
+        # loop through kmer counting the GC bases
+        gc_count = 0
+        for kmer_idx in range(kmer_len):
+            sba_idx = kmer_sba_start_idx + kmer_idx
+            base = sba[sba_idx]
+
+            if base == ord("$"):
+                raise ValueError(
+                    f"The kmer_len ({kmer_len}) requested is too larger for kmer_sba_start_idx ({kmer_sba_start_idx})"
+                )
+
+            if base == g_val or base == c_val:
+                gc_count += 1
+                # if we have already exceeded the max allowed GC counts, return False
+                if gc_count > max_allowed_gc_count:
+                    return False
+
+        # if the GC count is within the required range, return True
+        if min_allowed_gc_count <= gc_count and gc_count <= max_allowed_gc_count:
+            return True
+        return False
+
+    return filter
+
+
 @jit
-def kmer_is_valid(sba: np.array, sba_start_idx: int, min_kmer_len: int) -> bool:
+def kmer_has_required_len(sba: np.array, sba_start_idx: int, min_kmer_len: int) -> bool:
+    """
+    Checks whether the kmer is of at least min_kmer_len before reaching the end of the segment.
+
+    Args:
+        sba (np.array): sequence byte array
+        sba_start_idx (int): sequence byte array start index for the kmer
+        min_kmer_len (int): minimum kmer length
+
+    Returns:
+        bool:
+    """
     for idx in range(sba_start_idx, sba_start_idx + min_kmer_len):
         # determine whether the kmer has reached the end of a segment
         idx_is_at_end_of_segment = True if idx >= len(sba) or sba[idx] == ord("$") else False
@@ -933,10 +1120,10 @@ class Kmers:
             # verify that kmer_a and kmer_b are at least of length min_kmer_len
             if validate_kmers:
                 num_bases_to_check = min_kmer_len - (last_kmer_index_compared + 1)
-                kmer_a_is_valid = kmer_is_valid(
+                kmer_a_is_valid = kmer_has_required_len(
                     sba, kmer_sba_start_idx_a + last_kmer_index_compared + 1, num_bases_to_check
                 )
-                kmer_b_is_valid = kmer_is_valid(
+                kmer_b_is_valid = kmer_has_required_len(
                     sba, kmer_sba_start_idx_b + last_kmer_index_compared + 1, num_bases_to_check
                 )
                 if not kmer_a_is_valid or not kmer_b_is_valid:
