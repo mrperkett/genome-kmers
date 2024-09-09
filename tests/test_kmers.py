@@ -921,7 +921,7 @@ class TestKmerGenerator(TestKmers):
 
         return expected_kmer_nums_list, expected_group_sizes
 
-    def get_expected_kmer_info_generator_output(
+    def get_expected_kmer_info_generator_minimal_output(
         self,
         sorted_kmers: list[str],
         min_group_size: int = 1,
@@ -1236,7 +1236,7 @@ class TestKmerGenerator(TestKmers):
 
         # min_group = 1, max_group = 1, yield_first_n = 1
 
-        kmer_info = self.get_expected_kmer_info_generator_output(
+        kmer_info = self.get_expected_kmer_info_generator_minimal_output(
             sorted_kmers, min_group_size=1, max_group_size=1, yield_first_n=1
         )
         expected_kmer_info = [[4, 1, 1]]
@@ -1250,7 +1250,7 @@ class TestKmerGenerator(TestKmers):
         sorted_kmers = ["A", "A", "A", "A", "C", "G", "G", "T", "T", "T"]
 
         # min_group = 1, max_group = 3, yield_first_n = None
-        kmer_info = self.get_expected_kmer_info_generator_output(
+        kmer_info = self.get_expected_kmer_info_generator_minimal_output(
             sorted_kmers, min_group_size=1, max_group_size=3, yield_first_n=None
         )
         expected_kmer_info = [[4, 1, 1], [5, 2, 2], [6, 2, 2], [7, 3, 3], [8, 3, 3], [9, 3, 3]]
@@ -1390,7 +1390,7 @@ class TestKmerGenerator(TestKmers):
             kmer_info = [list(row) for row in generator]
 
             # check that everything matches what is expected
-            expected_kmer_info = self.get_expected_kmer_info_generator_output(
+            expected_kmer_info = self.get_expected_kmer_info_generator_minimal_output(
                 sorted_kmers, min_group_size, max_group_size, yield_first_n
             )
             self.assertEqual(kmer_info, expected_kmer_info)
@@ -1434,3 +1434,137 @@ class TestKmerGenerator(TestKmers):
         self.assertEqual(kmer_num, 0)
         self.assertEqual(group_size_yielded, 1)
         self.assertEqual(group_size_total, 2)
+
+    def test_generate_get_kmer_info_func_fwd(self):
+        """
+        Test the get_kmer_info function created by the Kmers class member function
+        generate_get_kmer_info_func.  Test by retrieving information for several kmers from
+        self.seq_coll_2.
+        """
+        # seq_2 = "ATCGAATTAG$GGATCTTGCATT$GTGATTGACCCCT"
+        # chr 1
+        # 0  ATCGAAT
+        # 1  TCGAATT
+        # 2  CGAATTA
+        # 3  GAATTAG
+        # chr 2
+        # 4  GGATCTT
+        # 5  GATCTTG
+        # 6  ATCTTGC
+        # 7  TCTTGCA
+        # 8  CTTGCAT
+        # 9  TTGCATT
+        # chr 3
+        # 10 GTGATTG
+        # 11 TGATTGA
+        # 12 GATTGAC
+        # 13 ATTGACC
+        # 14 TTGACCC
+        # 15 TGACCCC
+        # 16 GACCCCT
+        seq_coll = self.seq_coll_2
+        min_kmer_len = 7
+        max_kmer_len = 7
+        source_strand = "forward"
+
+        # build kmers object
+        kmers = Kmers(
+            seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand=source_strand,
+        )
+
+        # generate get_kmer_info_func
+        get_kmer_info = kmers.generate_get_kmer_info_func(one_based_seq_index=False)
+
+        # test it
+        sba_start_indices = kmers.kmer_sba_start_indices
+        sba = seq_coll.forward_sba
+        kmer_len_to_use = 7
+        group_size_yielded_to_use = 99
+        group_size_total_to_use = 101
+
+        # kmer_num = 0
+        kmer_info = get_kmer_info(
+            kmer_num=0,
+            kmer_sba_start_indices=sba_start_indices,
+            sba=sba,
+            kmer_len=kmer_len_to_use,
+            group_size_yielded=group_size_yielded_to_use,
+            group_size_total=group_size_total_to_use,
+        )
+
+        (
+            kmer_num,
+            seq_strand,
+            seq_chrom,
+            seq_start_idx,
+            kmer_len,
+            group_size_yielded,
+            group_size_total,
+        ) = kmer_info
+
+        assert kmer_num == 0
+        assert seq_strand == "+"
+        assert seq_chrom == "chr1"
+        assert seq_start_idx == 0
+        assert kmer_len == kmer_len_to_use
+        assert group_size_yielded == group_size_yielded_to_use
+        assert group_size_total == group_size_total_to_use
+
+        # kmer_num = 5
+        kmer_info = get_kmer_info(
+            kmer_num=5,
+            kmer_sba_start_indices=sba_start_indices,
+            sba=sba,
+            kmer_len=kmer_len_to_use,
+            group_size_yielded=group_size_yielded_to_use,
+            group_size_total=group_size_total_to_use,
+        )
+
+        (
+            kmer_num,
+            seq_strand,
+            seq_chrom,
+            seq_start_idx,
+            kmer_len,
+            group_size_yielded,
+            group_size_total,
+        ) = kmer_info
+
+        assert kmer_num == 5
+        assert seq_strand == "+"
+        assert seq_chrom == "chr2"
+        assert seq_start_idx == 1
+        assert kmer_len == kmer_len_to_use
+        assert group_size_yielded == group_size_yielded_to_use
+        assert group_size_total == group_size_total_to_use
+
+        # kmer_num = 16
+        kmer_info = get_kmer_info(
+            kmer_num=16,
+            kmer_sba_start_indices=sba_start_indices,
+            sba=sba,
+            kmer_len=kmer_len_to_use,
+            group_size_yielded=group_size_yielded_to_use,
+            group_size_total=group_size_total_to_use,
+        )
+
+        (
+            kmer_num,
+            seq_strand,
+            seq_chrom,
+            seq_start_idx,
+            kmer_len,
+            group_size_yielded,
+            group_size_total,
+        ) = kmer_info
+
+        assert kmer_num == 16
+        assert seq_strand == "+"
+        assert seq_chrom == "chr3"
+        assert seq_start_idx == 6
+        assert kmer_len == kmer_len_to_use
+        assert group_size_yielded == group_size_yielded_to_use
+        assert group_size_total == group_size_total_to_use
