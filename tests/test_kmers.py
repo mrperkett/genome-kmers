@@ -1,6 +1,4 @@
-import itertools
 import unittest
-from collections import Counter
 from typing import Union
 
 import numpy as np
@@ -9,6 +7,9 @@ import pytest
 from genome_kmers.kmers import (
     Kmers,
     compare_sba_kmers_lexicographically,
+    gen_kmer_gc_content_filter_func,
+    gen_kmer_homopolymer_filter_func,
+    gen_kmer_length_filter_func,
     get_compare_sba_kmers_func,
     get_kmer_info_minimal,
     kmer_filter_keep_all,
@@ -1612,3 +1613,324 @@ class TestKmerGenerator(TestKmers):
             kmer_str = kmers.get_kmer_str_no_checks(kmer_num, kmer_strand, this_kmer_len)
             kmer_strs.append(kmer_str)
         assert kmer_strs == sorted_kmers
+
+
+class TestFilters(TestKmers):
+    """
+    Test filter functions.
+
+    self.seq_coll_2 annotated sequence for understanding tests
+
+    0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29
+    A  T  C  G  A  A  T  T  A  G  $  G  G  A  T  C  T  T  G  C  A  T  T  $  G  T  G  A  T  T
+    30 31 32 33 34 35 36
+    G  A  C  C  C  C  T
+    """
+
+    def test_gen_kmer_length_filter_func_fwd_01(self):
+        """
+        Test gen_kmer_length_filter_func() using self.seq_coll_2 with min_kmer_len = 1
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # generate filter function
+        filter = gen_kmer_length_filter_func(min_kmer_len=1)
+
+        # set expected results
+        passing_ranges = [(0, 9), (11, 22), (24, 36)]
+        failing_ranges = []
+
+        # verify all ranges expected to result in the filter returning True
+        for start_idx, end_idx in passing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert filter(sba, sba_strand, i)
+
+        # verify all ranges expected to result in the filter returning False
+        for start_idx, end_idx in failing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert not filter(sba, sba_strand, i)
+
+    def test_gen_kmer_length_filter_func_fwd_02(self):
+        """
+        Test gen_kmer_length_filter_func() using self.seq_coll_2 with min_kmer_len = 11
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # generate filter function
+        filter = gen_kmer_length_filter_func(min_kmer_len=11)
+
+        # set expected results
+        passing_ranges = [(11, 12), (24, 26)]
+        failing_ranges = [(0, 9), (13, 22), (27, 36)]
+
+        # verify all ranges expected to result in the filter returning True
+        for start_idx, end_idx in passing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert filter(sba, sba_strand, i)
+
+        # verify all ranges expected to result in the filter returning False
+        for start_idx, end_idx in failing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert not filter(sba, sba_strand, i)
+
+    def test_gen_kmer_length_filter_func_fwd_03(self):
+        """
+        Test gen_kmer_length_filter_func() using self.seq_coll_2 with min_kmer_len = 5
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # generate filter function
+        filter = gen_kmer_length_filter_func(min_kmer_len=5)
+
+        # set expected results
+        passing_ranges = [(0, 5), (11, 18), (24, 32)]
+        failing_ranges = [(6, 9), (19, 22), (33, 36)]
+
+        # verify all ranges expected to result in the filter returning True
+        for start_idx, end_idx in passing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert filter(sba, sba_strand, i)
+
+        # verify all ranges expected to result in the filter returning False
+        for start_idx, end_idx in failing_ranges:
+            for i in range(start_idx, end_idx + 1):
+                assert not filter(sba, sba_strand, i)
+
+    def run_permutations_of_allowed_gc_test(self, sba, sba_strand, sba_idx, kmer_len, gc_frac):
+        """
+        Helper function to check whether the filter created by gen_kmer_gc_content_filter_func()
+        gives the expected output for different min_allowed_gc_frac and max_allowed_gc_frac values.
+        """
+        for min_allowed_gc_frac in [0.0, 0.25, 0.5, 0.75, 1.0]:
+            for max_allowed_gc_frac in [0.0, 0.25, 0.5, 0.75, 1.0]:
+                if min_allowed_gc_frac > max_allowed_gc_frac:
+                    continue
+                # build kmer_gc_content_filter
+                kmer_gc_content_filter = gen_kmer_gc_content_filter_func(
+                    min_allowed_gc_frac=min_allowed_gc_frac,
+                    max_allowed_gc_frac=max_allowed_gc_frac,
+                    kmer_len=kmer_len,
+                )
+                result = kmer_gc_content_filter(sba, sba_strand, sba_idx)
+                expected_result = min_allowed_gc_frac <= gc_frac <= max_allowed_gc_frac
+                assert result == expected_result
+
+    def test_gen_kmer_gc_content_filter_func_fwd_01(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer AATT
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # AATT
+        kmer_len = 4
+        sba_idx = 4
+        gc_frac = 0.0
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_fwd_02(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer CCCC
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # CCCC
+        kmer_len = 4
+        sba_idx = 32
+        gc_frac = 1.0
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_fwd_03(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer GCAT
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # GCAT
+        kmer_len = 4
+        sba_idx = 18
+        gc_frac = 0.5
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_fwd_04(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer A
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # A
+        kmer_len = 1
+        sba_idx = 0
+        gc_frac = 0.0
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_fwd_05(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer C
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # C
+        kmer_len = 1
+        sba_idx = 2
+        gc_frac = 1.0
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_fwd_06(self):
+        """
+        Test gen_kmer_gc_content_filter_func() on kmer GGATCTTGCATT
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # GGATCTTGCATT
+        kmer_len = 12
+        sba_idx = 11
+        gc_frac = 5.0 / 12.0
+        self.run_permutations_of_allowed_gc_test(sba, sba_strand, sba_idx, kmer_len, gc_frac)
+
+    def test_gen_kmer_gc_content_filter_func_error_01(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        min_allowed_gc_frac < 0.0
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_gc_content_filter_func(
+                min_allowed_gc_frac=-0.1,
+                max_allowed_gc_frac=1.0,
+                kmer_len=10,
+            )
+
+    def test_gen_kmer_gc_content_filter_func_error_02(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        min_allowed_gc_frac > 1.0
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_gc_content_filter_func(
+                min_allowed_gc_frac=1.1,
+                max_allowed_gc_frac=1.2,
+                kmer_len=10,
+            )
+
+    def test_gen_kmer_gc_content_filter_func_error_03(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        max_allowed_gc_frac < 0.0
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_gc_content_filter_func(
+                min_allowed_gc_frac=-0.2,
+                max_allowed_gc_frac=-0.1,
+                kmer_len=10,
+            )
+
+    def test_gen_kmer_gc_content_filter_func_error_04(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        max_allowed_gc_frac > 1.0
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_gc_content_filter_func(
+                min_allowed_gc_frac=0.0,
+                max_allowed_gc_frac=1.1,
+                kmer_len=10,
+            )
+
+    def test_gen_kmer_gc_content_filter_func_error_05(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        min_allowed_gc_frac > max_allowed_gc_frac
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_gc_content_filter_func(
+                min_allowed_gc_frac=0.7,
+                max_allowed_gc_frac=0.6,
+                kmer_len=10,
+            )
+
+    def run_permutations_of_homopolymer_filter(
+        self,
+        sba,
+        sba_strand,
+        sba_idx,
+        kmer_len,
+        longest_homopolymer,
+    ):
+        """
+        Helper function to check whether the filter created by gen_kmer_homopolymer_filter_func()
+        gives the expected output for different longest_homopolymer values.
+        """
+        for max_allowed_homopolymer in range(1, longest_homopolymer + 2):
+            filter = gen_kmer_homopolymer_filter_func(max_allowed_homopolymer, kmer_len)
+            result = filter(sba, sba_strand, sba_idx)
+            expected_result = longest_homopolymer <= max_allowed_homopolymer
+            assert result == expected_result
+
+    def test_gen_kmer_homopolymer_filter_func_fwd_01(self):
+        """
+        Test gen_kmer_homopolymer_filter_func() on kmer GTGATTGACCCCT
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # GTGATTGACCCCT
+        kmer_len = 13
+        sba_idx = 24
+        longest_homopolymer = 4
+        self.run_permutations_of_homopolymer_filter(
+            sba, sba_strand, sba_idx, kmer_len, longest_homopolymer
+        )
+
+    def test_gen_kmer_homopolymer_filter_func_fwd_02(self):
+        """
+        Test gen_kmer_homopolymer_filter_func() on kmer GTGATTGACCC
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # GTGATTGACCC
+        kmer_len = 11
+        sba_idx = 24
+        longest_homopolymer = 3
+        self.run_permutations_of_homopolymer_filter(
+            sba, sba_strand, sba_idx, kmer_len, longest_homopolymer
+        )
+
+    def test_gen_kmer_homopolymer_filter_func_fwd_03(self):
+        """
+        Test gen_kmer_homopolymer_filter_func() on kmer A
+        """
+        sba = self.seq_coll_2.forward_sba
+        sba_strand = "forward"
+
+        # A
+        kmer_len = 1
+        sba_idx = 0
+        longest_homopolymer = 1
+        self.run_permutations_of_homopolymer_filter(
+            sba, sba_strand, sba_idx, kmer_len, longest_homopolymer
+        )
+
+    def test_gen_kmer_homopolymer_filter_func_error_01(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        max_homopolymer_size < 1
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_homopolymer_filter_func(max_homopolymer_size=0, kmer_len=10)
+
+    def test_gen_kmer_homopolymer_filter_func_error_02(self):
+        """
+        Test that gen_kmer_gc_content_filter_func() raises an exception
+        kmer_len < 1
+        """
+        with pytest.raises(ValueError):
+            gen_kmer_homopolymer_filter_func(max_homopolymer_size=3, kmer_len=0)
