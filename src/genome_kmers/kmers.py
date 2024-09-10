@@ -355,6 +355,101 @@ def get_kmer_info_minimal(
     return kmer_num, group_size_yielded, group_size_total
 
 
+@jit
+def get_kmer_info_group_size_only(
+    kmer_num: int,
+    kmer_sba_start_indices: np.array,
+    sba: np.array,
+    kmer_len: Union[int, None],
+    group_size_yielded: int,
+    group_size_total: int,
+) -> tuple[int, int, int]:
+    """
+    Return only group_size_total without any processing.
+
+    Args:
+        kmer_num (int): kmer number
+        kmer_start_indices (np.array): kmer sequence byte array start indices
+        sba (np.array): sequence byte array
+        kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+        group_size_yielded (int): number of kmers in the group that will be yielded
+        group_size_total (int): number of kmers in the group in total
+
+    Returns:
+        int: group_size_total
+    """
+    return group_size_total
+
+
+@jit
+def get_kmer_group_size_hist(
+    sba: np.array,
+    sba_strand: str,
+    kmer_len: Union[int, None],
+    kmer_start_indices: np.array,
+    kmer_comparison_func: Callable,
+    kmer_filter_func: Callable,
+    min_group_size: int = 1,
+    max_group_size: Union[int, None] = None,
+    max_counts_bin: int = 1000000,
+) -> tuple[np.array, int]:
+    """
+    Build a histogram of group sizes.  counts_by_group_size[i] gives the number of groups of size
+    i.  Any group sizes > max_counts_bin will be placed in max_counts_bin.  The total number of
+    kmers is also calculated.
+
+    Args:
+        sba (np.array): sequence byte array
+        sba_strand (str): "forward" or "reverse_complement"
+        kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+        kmer_start_indices (np.array): kmer sequence byte array start indices
+        kmer_comparison_func (Callable): function that returns the result of a two kmer comparison
+        kmer_filter_func (Callable): function that returns true if a kmer passes all filters
+        min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
+        max_group_size (Union[int, None], optional): Largest allowed group size.  If None, then
+            there is no maximum group size. Defaults to None.
+        max_counts_bin (int, optional): largest group_size bin in the return counts_by_group_size
+            array. Group sizes that exceed this value will be placed in this bin. Defaults to
+            1000000.
+
+    Raises:
+        ValueError: max_counts_bin is invalid
+
+    Returns:
+        tuple[np.array, int]: counts_by_group_size, total_kmer_count
+    """
+    if max_counts_bin <= 0:
+        raise ValueError(f"max_counts_bin ({max_counts_bin}) must be >= 1")
+
+    # set kmer_info_func and yield_first_n so that the group size is yielded once per group
+    kmer_info_func = get_kmer_info_group_size_only
+    yield_first_n = 1
+
+    # initialize the kmer info generator
+    kmer_generator = kmer_info_by_group_generator(
+        sba,
+        sba_strand,
+        kmer_len,
+        kmer_start_indices,
+        kmer_comparison_func,
+        kmer_filter_func,
+        kmer_info_func,
+        min_group_size,
+        max_group_size,
+        yield_first_n,
+    )
+
+    # populate the array to hold the number of group counts for each group size.  Also count the
+    # total number of kmers
+    counts_by_group_size = np.zeros((max_counts_bin + 1,), dtype=np.int64)
+    total_kmer_count = 0
+    for group_size_total in kmer_generator:
+        total_kmer_count += group_size_total
+        counts_by_group_size[min(group_size_total, max_counts_bin)] += 1
+
+    return counts_by_group_size, total_kmer_count
+
+
 @jit(cache=False)
 def kmer_info_by_group_generator(
     sba: np.array,
