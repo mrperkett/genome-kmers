@@ -1771,6 +1771,290 @@ class TestKmerGenerator(TestKmers):
             kmer_strs.append(kmer_str)
         assert kmer_strs == sorted_kmers
 
+    def test_get_kmer_count_fwd_01(self):
+        """
+        Test get_kmer_count() member function on 1-mers with no filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 1
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 35
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len)
+        assert kmer_count == expected_kmer_count
+
+        kmers.sort()
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len)
+        assert kmer_count == expected_kmer_count
+
+    def test_get_kmer_count_fwd_02(self):
+        """
+        Test get_kmer_count() member function on 5-mers with no filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 5
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 6 + 8 + 9
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len)
+        assert kmer_count == expected_kmer_count
+
+        kmers.sort()
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len)
+        assert kmer_count == expected_kmer_count
+
+    def test_get_kmer_count_fwd_03(self):
+        """
+        Test get_kmer_count() member function on 5-mers with a homopolymer filter.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 5
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 20
+
+        # build filter function
+        kmer_filter_func = gen_kmer_homopolymer_filter_func(
+            max_homopolymer_size=2, kmer_len=kmer_len
+        )
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+
+        kmers.sort()
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, kmer_filter_func=kmer_filter_func)
+        assert kmer_count == expected_kmer_count
+
+    def test_get_kmer_count_fwd_04(self):
+        """
+        Test get_kmer_count() member function on 3-mers with group size filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 3
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+        kmers.sort()
+
+        # verify kmer count matches what is expected for varying min and max group sizes
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, min_group_size=1, max_group_size=1)
+        assert kmer_count == 16
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, min_group_size=2, max_group_size=2)
+        assert kmer_count == 10
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, min_group_size=3, max_group_size=3)
+        assert kmer_count == 3
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, min_group_size=2, max_group_size=3)
+        assert kmer_count == 13
+
+        kmer_count = kmers.get_kmer_count(kmer_len=kmer_len, min_group_size=1, max_group_size=2)
+        assert kmer_count == 26
+
+    def test_get_kmer_group_counts_fwd_01(self):
+        """
+        Test get_kmer_group_counts() member function on 1-mers with no filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 1
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 35
+        # A = 8, T = 12, G = 8, C = 7
+        expected_counts_by_group_size = np.array(
+            [0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 1, 0, 0, 0], dtype=np.int64
+        )
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+        kmers.sort()
+
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, max_counts_bin=15
+        )
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+    def test_get_kmer_group_counts_fwd_02(self):
+        """
+        Test get_kmer_group_counts() member function on 5-mers with no filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 5
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 6 + 8 + 9
+        expected_counts_by_group_size = np.array(
+            [0, expected_kmer_count, 0, 0, 0, 0], dtype=np.int64
+        )
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+        kmers.sort()
+
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, max_counts_bin=5
+        )
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+    def test_get_kmer_group_counts_fwd_03(self):
+        """
+        Test get_kmer_group_counts() member function on 5-mers with a homopolymer filter.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 5
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+        expected_kmer_count = 20
+        expected_counts_by_group_size = np.array(
+            [0, expected_kmer_count, 0, 0, 0, 0], dtype=np.int64
+        )
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+        kmers.sort()
+
+        # build filter function
+        kmer_filter_func = gen_kmer_homopolymer_filter_func(
+            max_homopolymer_size=2, kmer_len=kmer_len
+        )
+
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, max_counts_bin=5, kmer_filter_func=kmer_filter_func
+        )
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+    def test_get_kmer_group_counts_fwd_04(self):
+        """
+        Test get_kmer_group_counts() member function on 3-mers with group size filters.
+        """
+        seq_coll = self.seq_coll_2
+        kmer_len = 3
+        min_kmer_len = kmer_len
+        max_kmer_len = kmer_len
+
+        # build kmers, run calculation, check that it matches expected
+        kmers = Kmers(
+            seq_coll=seq_coll,
+            min_kmer_len=min_kmer_len,
+            max_kmer_len=max_kmer_len,
+            source_strand="forward",
+        )
+        kmers.sort()
+
+        # verify kmer count matches what is expected for varying min and max group sizes
+
+        # 1 <= group_size <= 1
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=1, max_group_size=1, max_counts_bin=5
+        )
+        expected_kmer_count = 16
+        expected_counts_by_group_size = np.array([0, 16, 0, 0, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 2 <= group_size <= 2
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=2, max_group_size=2, max_counts_bin=5
+        )
+        expected_kmer_count = 10
+        expected_counts_by_group_size = np.array([0, 0, 5, 0, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 3 <= group_size <= 3
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=3, max_group_size=3, max_counts_bin=5
+        )
+        expected_kmer_count = 3
+        expected_counts_by_group_size = np.array([0, 0, 0, 1, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 2 <= group_size <= 3
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=2, max_group_size=3, max_counts_bin=5
+        )
+        expected_kmer_count = 13
+        expected_counts_by_group_size = np.array([0, 0, 5, 1, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 1 <= group_size <= 2
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=1, max_group_size=2, max_counts_bin=5
+        )
+        expected_kmer_count = 26
+        expected_counts_by_group_size = np.array([0, 16, 5, 0, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 1 <= group_size <= 3
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=1, max_group_size=3, max_counts_bin=5
+        )
+        expected_kmer_count = 29
+        expected_counts_by_group_size = np.array([0, 16, 5, 1, 0, 0], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
+        # 1 <= group_size <= 3, max_counts_bin = 2
+        counts_by_group_size, kmer_count = kmers.get_kmer_group_counts(
+            kmer_len=kmer_len, min_group_size=1, max_group_size=3, max_counts_bin=2
+        )
+        expected_kmer_count = 29
+        expected_counts_by_group_size = np.array([0, 16, 6], dtype=np.int64)
+        assert kmer_count == expected_kmer_count
+        assert np.array_equal(counts_by_group_size, expected_counts_by_group_size)
+
 
 class TestFilters(TestKmers):
     """

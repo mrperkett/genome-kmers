@@ -923,6 +923,192 @@ class Kmers:
 
         return
 
+    def get_kmer_count(
+        self,
+        kmer_len: Union[int, None],
+        kmer_filter_func: Callable = kmer_filter_keep_all,
+        min_group_size: int = 1,
+        max_group_size: Union[int, None] = None,
+    ) -> int:
+        """
+        A customizable function to count the total number of kmers passing filters.
+
+        Examples:
+
+        Count kmers that occur exactly once
+        kmers.get_kmer_count(max_group_size=1)
+
+        Count kmers that are repeated at least 5 times and no more than 10 times
+        kmers.get_kmer_count(min_group_size=5, max_group_size=10)
+
+        Count 50-mers
+        filter = gen_kmer_length_filter_func(min_kmer_len=50)
+        kmers.get_kmer_count(kmer_filter_func=filter)
+
+        Args:
+            kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+            kmer_filter_func (Callable, optional): function that returns true if a kmer passes all
+                filters. Defaults to kmer_filter_keep_all.
+            min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
+            max_group_size (Union[int, None], optional): Largest allowed group size.  If None, then
+                there is no maximum group size. Defaults to None.
+
+        Raises:
+            NotImplementedError: if kmer_source_strand and seq_coll.strands() loaded are not both
+                "forward"
+            ValueError: kmer_len is invalid
+            ValueError: one or more group params are invalid (min_group_size, max_group_size,
+                yield_first_n)
+            ValueError: kmer_comparison_func is provided when kmers have not been sorted
+
+        Returns:
+            int: total_kmer_count
+        """
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # verify that kmer_len is valid
+        if kmer_len is not None and kmer_len < 1:
+            raise ValueError(f"kmer_len ({kmer_len}) must be > 0")
+
+        # verify that if kmers has not been sorted, that group arguments have not been provided
+        if not self._is_sorted:
+            if min_group_size != 1:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. min_group_size ({min_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+            if max_group_size is not None:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. max_group_size ({max_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+
+        # set kmer_comparison_func
+        if self._is_sorted:
+            kmer_comparison_func = get_compare_sba_kmers_func(kmer_len)
+        else:
+            kmer_comparison_func = compare_sba_kmers_always_less_than
+
+        # collect values to pass to the calculation
+        sba = self.seq_coll.forward_sba
+        sba_strand = self.seq_coll.strands_loaded()
+        kmer_start_indices = self.kmer_sba_start_indices
+
+        # run calculation
+        _, total_kmer_count = get_kmer_group_size_hist(
+            sba,
+            sba_strand,
+            kmer_len,
+            kmer_start_indices,
+            kmer_comparison_func,
+            kmer_filter_func,
+            min_group_size,
+            max_group_size,
+        )
+
+        return total_kmer_count
+
+    def get_kmer_group_counts(
+        self,
+        kmer_len: Union[int, None],
+        kmer_filter_func: Callable = kmer_filter_keep_all,
+        min_group_size: int = 1,
+        max_group_size: Union[int, None] = None,
+        max_counts_bin: int = 1000000,
+    ) -> tuple[np.array, int]:
+        """
+        A customizable function to build a histogram of group sizes for kmers passing filters.
+
+        Examples:
+
+        Get histogram for 50-mers
+        filter = gen_kmer_length_filter_func(min_kmer_len=50)
+        kmers.get_kmer_group_counts(kmer_filter_func=filter)
+
+        Args:
+            kmer_len (Union[int, None]): length of kmer.  If None, take the longest possible.
+            kmer_filter_func (Callable, optional): function that returns true if a kmer passes
+                all filters. Defaults to kmer_filter_keep_all.
+            min_group_size (int, optional): Smallest allowed group size. Defaults to 1.
+            max_group_size (Union[int, None], optional): Largest allowed group size.  If None,
+                then there is no maximum group size. Defaults to None.
+            max_counts_bin (int, optional): largest group_size bin in the return
+                counts_by_group_size array. Group sizes that exceed this value will be placed in
+                this bin. Defaults to 1000000.
+
+        Raises:
+            NotImplementedError: if kmer_source_strand and seq_coll.strands() loaded are not
+            both "forward"
+            ValueError: kmer_len is invalid
+            ValueError: one or more group params are invalid (min_group_size, max_group_size,
+                yield_first_n)
+            ValueError: kmer_comparison_func is provided when kmers have not been sorted
+
+        Returns:
+            tuple[np.array, int]:
+                counts_by_group_size (np.array): histogram of group sizes
+                    counts_by_group_size[i] gives the number of groups of size i. Any group
+                    sizes > max_counts_bin will be placed in max_counts_bin.
+                total_kmer_count (int): total number of kmers
+        """
+
+        condition1 = self.kmer_source_strand != "forward"
+        condition2 = self.seq_coll.strands_loaded() != "forward"
+        if condition1 or condition2:
+            raise NotImplementedError(
+                f"both kmer_source_strand ({self.kmer_source_strand}) and "
+                "sequence_collection.strands_loaded() must be 'forward'"
+            )
+
+        # verify that kmer_len is valid
+        if kmer_len is not None and kmer_len < 1:
+            raise ValueError(f"kmer_len ({kmer_len}) must be > 0")
+
+        # verify that if kmers has not been sorted, that group arguments have not been provided
+        if not self._is_sorted:
+            if min_group_size != 1:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. min_group_size ({min_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+            if max_group_size is not None:
+                msg = "Returning group parameters is not supported when kmers has not been"
+                msg += f" sorted. max_group_size ({max_group_size}) cannot be specified. Did you"
+                msg += " mean to run sort() before getting kmers?"
+                raise ValueError(msg)
+
+        # set kmer_comparison_func
+        if self._is_sorted:
+            kmer_comparison_func = get_compare_sba_kmers_func(kmer_len)
+        else:
+            raise AssertionError(f"The kmers must be sorted when calling get_kmer_group_counts")
+
+        # collect values to pass to the calculation
+        sba = self.seq_coll.forward_sba
+        sba_strand = self.seq_coll.strands_loaded()
+        kmer_start_indices = self.kmer_sba_start_indices
+
+        # run calculation
+        counts_by_group_size, total_kmer_count = get_kmer_group_size_hist(
+            sba,
+            sba_strand,
+            kmer_len,
+            kmer_start_indices,
+            kmer_comparison_func,
+            kmer_filter_func,
+            min_group_size,
+            max_group_size,
+            max_counts_bin,
+        )
+
+        return counts_by_group_size, total_kmer_count
+
     def generate_get_kmer_info_func(self, one_based_seq_index: bool) -> Callable:
         """
         Generate the get_kmer_info function that is used to get kmer information from a sequence
