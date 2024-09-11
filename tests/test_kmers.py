@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from typing import Union
 
@@ -2489,3 +2491,179 @@ class TestComparison(TestKmers):
         assert not (self.kmers_a == self.kmers_b)
 
 
+class TestSaveLoad(TestKmers):
+
+    def setUp(self):
+        super().setUp()
+
+        seq_coll_1 = SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
+        self.kmers_1 = Kmers(
+            seq_coll_1,
+            min_kmer_len=1,
+            max_kmer_len=None,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+
+        seq_coll_2 = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+        self.kmers_2 = Kmers(
+            seq_coll_2,
+            min_kmer_len=1,
+            max_kmer_len=None,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+
+        return
+
+    def test_save_load_01(self):
+        """
+        Test save and load for seq_coll_1, hdf5 format, and include_sequence_collection=True
+        """
+        kmers_a = self.kmers_1
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.hdf5")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="hdf5",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, format="hdf5")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_02(self):
+        """
+        Test save and load for seq_coll_1, hdf5 format, and include_sequence_collection=False
+        """
+        kmers_a = self.kmers_1
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.hdf5")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="hdf5",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, seq_coll=self.seq_coll_1, format="hdf5")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_03(self):
+        """
+        Test save and load for seq_coll_2, hdf5 format, and include_sequence_collection=True
+        """
+        kmers_a = self.kmers_2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.hdf5")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="hdf5",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, format="hdf5")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_04(self):
+        """
+        Test save and load for seq_coll_2, hdf5 format, and include_sequence_collection=False
+        """
+        kmers_a = self.kmers_2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.hdf5")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="hdf5",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, seq_coll=self.seq_coll_2, format="hdf5")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_05(self):
+        """
+        Test save and load for seq_coll_1, db format, and include_sequence_collection=True
+        """
+        kmers_a = self.kmers_1
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.db")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="shelve",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, format="shelve")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_06(self):
+        """
+        Test save and load for seq_coll_1, db format, and include_sequence_collection=False
+        """
+        kmers_a = self.kmers_1
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.db")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="shelve",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, seq_coll=self.seq_coll_1, format="shelve")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_07(self):
+        """
+        Test save and load for seq_coll_2, db format, and include_sequence_collection=True
+        """
+        kmers_a = self.kmers_2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.db")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="shelve",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, format="shelve")
+
+        assert kmers_a == kmers_b
+
+    def test_save_load_08(self):
+        """
+        Test save and load for seq_coll_2, db format, and include_sequence_collection=False
+        """
+        kmers_a = self.kmers_2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp.db")
+            kmers_a.save(
+                save_file_path=save_file_path,
+                include_sequence_collection=True,
+                mode="w",
+                format="shelve",
+            )
+
+            kmers_b = Kmers()
+            kmers_b.load(save_file_path, seq_coll=self.seq_coll_2, format="shelve")
+
+        assert kmers_a == kmers_b
