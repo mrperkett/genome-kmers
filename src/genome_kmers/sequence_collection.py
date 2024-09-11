@@ -399,18 +399,6 @@ class SequenceCollection:
         """
         return self._strands_loaded
 
-    def save_state(self, save_file_base):
-        """
-        Save current state to file so that it can be reloaded from disk.
-        """
-        raise NotImplementedError()
-
-    def load_state(self, save_file_base):
-        """
-        Load state from file.
-        """
-        raise NotImplementedError()
-
     @staticmethod
     def _get_complement_mapping_array():
         """
@@ -1261,3 +1249,198 @@ class SequenceCollection:
 
         # if this is reached, then they are equal
         return True
+
+    @staticmethod
+    def _set_for_export(value, value_if_none):
+        """
+        Helper function that converts a None value into the appropriate indicator value if value
+        equals value_if_none. This is used to help deal with the HDF5 format not handling null
+        values.
+
+        Args:
+            value: value we want to pass to serialize with HDF5
+            value_if_none: what to pass to HDF5 instead of value if value is None
+
+        Returns:
+            value_if_none if value is None else value
+        """
+        if value is None:
+            return value_if_none
+        else:
+            return value
+
+    @staticmethod
+    def _correct_import(value, value_if_none):
+        """
+        Helper function that converts a value read from HDF5 to None if it equal to the indicator
+        value value_if_none. This is used to help deal with the HDF5 format not handling null
+        values.
+
+        Args:
+            value: value we want to pass to serialize with HDF5
+            value_if_none: what to pass to HDF5 instead of value if value is None
+
+        Returns:
+            None if value == value_if_none else value
+        """
+        if isinstance(value, np.ndarray):
+            if value.shape == (0,):
+                return None
+        elif value == value_if_none:
+            return None
+        return value
+
+    def save(self, save_file_path: Path, mode: str = "a", format: str = "hdf5") -> None:
+        """
+        Save SequenceCollection object to file.
+
+        Args:
+            save_file_path (Path): path for saved file
+            format (str, optional): "hdf5" or "shelve". Defaults to "hdf5".
+            mode (str, optional): mode with which to open file and save information. "w" for write
+                or "a" for append. Defaults to "a".
+
+        Raises:
+            ValueError: format not recognized
+        """
+        if format == "hdf5":
+            self._save_hdf5(save_file_path, mode=mode)
+        elif format == "shelve":
+            self._save_shelve(save_file_path)
+        else:
+            raise ValueError(f"format ({format}) not recognized")
+
+    def load(self, load_file_path: Path, format: str = "hdf5"):
+        """
+        Load SequenceCollection object from saved file.
+
+        Args:
+            load_file_path (Path): path to file to load.
+            format (str, optional): "hdf5" or "shelve". Defaults to "hdf5".
+
+        Raises:
+            ValueError: format not recognized
+        """
+        if format == "hdf5":
+            self._load_h5py(load_file_path)
+        elif format == "shelve":
+            self._load_shelve(load_file_path)
+        else:
+            raise ValueError(f"format ({format}) not recognized")
+
+    def _save_hdf5(self, save_file_path: Path, mode: str = "a") -> None:
+        """
+        Save SequenceCollection object information to HDF5 file format.
+
+        Args:
+            save_file_path (Path): path for saved file
+            mode (str, optional): mode with which to open file and save information. "w" for write
+                or "a" for append. Defaults to "a".
+        """
+        with h5py.File(save_file_path, mode) as file:
+            grp = file.create_group("seq_coll")
+
+            # hdf5 does not accept None values.  Correct them before exporting.
+            forward_sba = self._set_for_export(self.forward_sba, np.array([], dtype=np.uint8))
+            _forward_sba_seg_starts = self._set_for_export(self._forward_sba_seg_starts, [])
+            forward_record_names = self._set_for_export(self.forward_record_names, [])
+            revcomp_sba = self._set_for_export(self.revcomp_sba, np.array([], dtype=np.uint8))
+            _revcomp_sba_seg_starts = self._set_for_export(self._revcomp_sba_seg_starts, [])
+            revcomp_record_names = self._set_for_export(self.revcomp_record_names, [])
+            _strands_loaded = self._set_for_export(self._strands_loaded, "")
+            _fasta_file_path = self._set_for_export(self._fasta_file_path, "")
+
+            # save them to file
+            grp["forward_sba"] = forward_sba
+            grp["_forward_sba_seg_starts"] = _forward_sba_seg_starts
+            grp["forward_record_names"] = forward_record_names
+            grp["revcomp_sba"] = revcomp_sba
+            grp["_revcomp_sba_seg_starts"] = _revcomp_sba_seg_starts
+            grp["revcomp_record_names"] = revcomp_record_names
+            grp["_strands_loaded"] = _strands_loaded
+            grp["_fasta_file_path"] = str(_fasta_file_path)
+
+            # do not save the members set by _initialize_mapping_arrays()
+
+        return
+
+    def _load_h5py(self, load_file_path: Path):
+        """
+        Load SequenceCollection object information from HDF5 file format.
+
+        Args:
+            load_file_path (Path): path to file to load.
+        """
+        with h5py.File(load_file_path, "r") as file:
+            grp = file["seq_coll"]
+            empty_sba = np.array([], dtype=np.uint8)
+
+            # read values from file
+            self.forward_sba = self._correct_import(grp["forward_sba"][:], empty_sba)
+            self._forward_sba_seg_starts = self._correct_import(
+                grp["_forward_sba_seg_starts"][:], []
+            )
+            self.forward_record_names = [val.decode("utf-8") for val in grp["forward_record_names"]]
+            self.forward_record_names = self._correct_import(self.forward_record_names, [])
+
+            self.revcomp_sba = self._correct_import(grp["revcomp_sba"][:], empty_sba)
+            self._revcomp_sba_seg_starts = self._correct_import(
+                grp["_revcomp_sba_seg_starts"][:], []
+            )
+            self.revcomp_record_names = [val.decode("utf-8") for val in grp["revcomp_record_names"]]
+            self.revcomp_record_names = self._correct_import(self.revcomp_record_names, [])
+
+            self._strands_loaded = self._correct_import(
+                grp["_strands_loaded"][()].decode("utf-8"), ""
+            )
+            self._fasta_file_path = self._correct_import(
+                grp["_fasta_file_path"][()].decode("utf-8"), ""
+            )
+            if self._fasta_file_path is not None:
+                self._fasta_file_path = Path(self._fasta_file_path)
+
+            # initialize mapping arrays
+            self._initialize_mapping_arrays()
+
+        return
+
+    def _save_shelve(self, save_file_path: Path) -> None:
+        """
+        Save SequenceCollection object information to shelve file format.
+
+        Args:
+            save_file_path (Path): path for saved file
+        """
+        with shelve.open(save_file_path, protocol=pickle.DEFAULT_PROTOCOL) as db:
+            db["seq_coll.forward_sba"] = self.forward_sba
+            db["seq_coll._forward_sba_seg_starts"] = self._forward_sba_seg_starts
+            db["seq_coll.forward_record_names"] = self.forward_record_names
+            db["seq_coll.revcomp_sba"] = self.revcomp_sba
+            db["seq_coll._revcomp_sba_seg_starts"] = self._revcomp_sba_seg_starts
+            db["seq_coll.revcomp_record_names"] = self.revcomp_record_names
+            db["seq_coll._strands_loaded"] = self._strands_loaded
+            db["seq_coll._fasta_file_path"] = self._fasta_file_path
+
+            # do not save the members set by _initialize_mapping_arrays()
+
+        return
+
+    def _load_shelve(self, load_file_path: Path):
+        """
+        Load SequenceCollection object information from shelve file format.
+
+        Args:
+            load_file_path (Path): path to file to load.
+        """
+        with shelve.open(load_file_path) as db:
+            self.forward_sba = db["seq_coll.forward_sba"]
+            self._forward_sba_seg_starts = db["seq_coll._forward_sba_seg_starts"]
+            self.forward_record_names = db["seq_coll.forward_record_names"]
+            self.revcomp_sba = db["seq_coll.revcomp_sba"]
+            self._revcomp_sba_seg_starts = db["seq_coll._revcomp_sba_seg_starts"]
+            self.revcomp_record_names = db["seq_coll.revcomp_record_names"]
+            self._strands_loaded = db["seq_coll._strands_loaded"]
+            self._fasta_file_path = db["seq_coll._fasta_file_path"]
+
+            self._initialize_mapping_arrays()
+        return
