@@ -282,7 +282,7 @@ class TestInit(TestKmers):
         with pytest.raises(ValueError) as e_info:
             Kmers(
                 self.seq_coll_1,
-                min_kmer_len=None,
+                min_kmer_len=1,
                 max_kmer_len=0,
                 source_strand="forward",
                 track_strands_separately=False,
@@ -315,7 +315,7 @@ class TestInit(TestKmers):
             self.seq_coll_1.reverse_complement()
             Kmers(
                 self.seq_coll_1,
-                min_kmer_len=None,
+                min_kmer_len=1,
                 max_kmer_len=None,
                 source_strand="forward",
                 track_strands_separately=False,
@@ -2375,3 +2375,117 @@ class TestFilters(TestKmers):
         """
         with pytest.raises(ValueError):
             gen_kmer_homopolymer_filter_func(max_homopolymer_size=3, kmer_len=0)
+
+
+class TestComparison(TestKmers):
+
+    def setUp(self):
+        super().setUp()
+
+        seq_coll_a = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+        seq_coll_b = SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+
+        self.kmers_a = Kmers(
+            seq_coll_a,
+            min_kmer_len=1,
+            max_kmer_len=None,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+
+        self.kmers_b = Kmers(
+            seq_coll_b,
+            min_kmer_len=1,
+            max_kmer_len=None,
+            source_strand="forward",
+            track_strands_separately=False,
+        )
+        return
+
+    def test_eq_01(self):
+        """
+        Equal kmers
+        """
+        assert self.kmers_a == self.kmers_b
+
+    def test_eq_02(self):
+        """
+        Differing min_kmer_len
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.min_kmer_len = 2
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_03(self):
+        """
+        Differing max_kmer_len
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.max_kmer_len = 2
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_04(self):
+        """
+        Differing kmer_source_strand
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.kmer_source_strand = "reverse_complement"
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_05(self):
+        """
+        Differing track_strands_separately
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.track_strands_separately = True
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_06(self):
+        """
+        Differing _is_initialized
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b._is_initialized = False
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_07(self):
+        """
+        Differing _is_set
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b._is_set = True
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_08(self):
+        """
+        Differing _is_sorted
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b._is_sorted = True
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_09(self):
+        """
+        Differing kmer_sba_start_indices
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.kmer_sba_start_indices = np.array([1, 2], dtype=np.uint32)
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_10(self):
+        """
+        Differing kmer_sba_start_indices
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.kmer_sba_start_indices = None
+        assert not (self.kmers_a == self.kmers_b)
+
+    def test_eq_11(self):
+        """
+        Differing seq_coll
+        """
+        assert self.kmers_a == self.kmers_b
+        self.kmers_b.seq_coll = self.seq_coll_1
+        assert not (self.kmers_a == self.kmers_b)
+
+

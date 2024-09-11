@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Callable, Generator, Union
 
 import numba as nb
@@ -585,9 +586,9 @@ class Kmers:
 
     def __init__(
         self,
-        seq_coll: SequenceCollection,
-        min_kmer_len: tuple[int, None] = None,
-        max_kmer_len: tuple[int, None] = None,
+        seq_coll: Union[SequenceCollection, None] = None,
+        min_kmer_len: int = 1,
+        max_kmer_len: Union[int, None] = None,
         source_strand: str = "forward",
         track_strands_separately: bool = False,
         method: str = "single_pass",
@@ -598,8 +599,8 @@ class Kmers:
         Args:
             seq_coll (SequenceCollection): the sequence collection on which kmers are
                 defined
-            min_kmer_len (tuple[int, None], optional): kmers below this size are not considered.
-                Defaults to None.
+            min_kmer_len (int, optional): kmers below this size are not considered.
+                Defaults to 1.
             max_kmer_len (tuple[int, None], optional): kmers above this size are not considered.
                 Defaults to None.
             source_strand (str, optional): strand(s) on which kmers are defined ("forward",
@@ -615,18 +616,24 @@ class Kmers:
             ValueError: invalid arguments
             NotImplementedError: yet to be implemented functionality
         """
+        # check whether arguments required functionality that has not yet been implemented
+        if track_strands_separately:
+            raise NotImplementedError(
+                f"This function has not been implemented for track_strands_separately = '{track_strands_separately}'"
+            )
+        if source_strand != "forward":
+            raise NotImplementedError(
+                f"This function has not been implemented for source_strand = '{source_strand}'"
+            )
+
         # verify that arguments are valid
         if source_strand not in ("forward", "reverse_complement", "both"):
             raise ValueError(f"source_strand ({source_strand}) not recognized")
-        if track_strands_separately not in (True, False):
-            raise ValueError(
-                f"track_strands_separately must be True or False, but it has value {track_strands_separately}"
-            )
         if source_strand != "both" and track_strands_separately:
             raise ValueError(
                 f"track_strands_separately can only be true if source_strand is 'both', but it is '{source_strand}'"
             )
-        if min_kmer_len is not None and min_kmer_len < 1:
+        if min_kmer_len < 1:
             raise ValueError(f"min_kmer_len ({min_kmer_len}) must be greater than zero")
         if max_kmer_len is not None:
             if max_kmer_len < 1:
@@ -635,6 +642,21 @@ class Kmers:
                 raise ValueError(
                     f"max_kmer_len ({max_kmer_len}) is less than min_kmer_len ({min_kmer_len})"
                 )
+
+        # set member variables based on arguments
+        self.min_kmer_len = min_kmer_len
+        self.max_kmer_len = max_kmer_len
+        self.kmer_source_strand = source_strand
+        self.track_strands_separately = track_strands_separately
+
+        self._is_initialized = False
+        self._is_set = False
+        self._is_sorted = False
+        self.kmer_sba_start_indices = None
+
+        # if seq_coll is not provided, return without any further processing
+        if seq_coll is None:
+            return
 
         # count number of records and sequence lengths in sequence_collection
         seq_lengths = []
@@ -662,31 +684,8 @@ class Kmers:
                 f"source_strand ({source_strand}) does not match sequence_collection loaded strand ({seq_coll.strands_loaded()})"
             )
 
-        # check that argument values have implemented functionality
-        if track_strands_separately:
-            raise NotImplementedError(
-                f"This function has not been implemented for track_strands_separately = '{track_strands_separately}'"
-            )
-        if source_strand != "forward":
-            raise NotImplementedError(
-                f"This function has not been implemented for source_strand = '{source_strand}'"
-            )
-
-        # set member variables based on arguments
+        # set seq_coll and initialize
         self.seq_coll = seq_coll
-        if min_kmer_len is None:
-            self.min_kmer_len = 1
-        else:
-            self.min_kmer_len = min_kmer_len
-        self.max_kmer_len = max_kmer_len
-        self.kmer_source_strand = source_strand
-        self.track_strands_separately = track_strands_separately
-
-        self._is_initialized = False
-        self._is_set = False
-        self._is_sorted = False
-        self.kmer_sba_start_indices = None
-
         self._initialize(method=method)
 
         return
@@ -1195,26 +1194,61 @@ class Kmers:
 
         return get_kmer_info
 
-    def save_state(self, save_file_base, include_sequence_collection):
-        """
-        Save current state to file so that it can be reloaded from disk.  Consider some
-        sort of a check on the sequence
-        file to ensure reloading from a fasta works.
-        NOTE: this is a medium-to-large task to do properly with saved metadata
-        """
-        pass
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
-    def load_state(self, save_file_base, sequence_collection=None):
-        """
-        Load state from file
-        """
-        pass
+    def __eq__(self, other):
+        if self.min_kmer_len != other.min_kmer_len:
+            return False
 
-    def unique(self, kmer_len, inplace=False):
+        # max_kmer_len is nullable
+        if self.max_kmer_len is None and other.max_kmer_len is not None:
+            return False
+        elif self.max_kmer_len is not None and other.max_kmer_len is None:
+            return False
+        elif self.max_kmer_len != other.max_kmer_len:
+            return False
+
+        if self.kmer_source_strand != other.kmer_source_strand:
+            return False
+        if self.track_strands_separately != other.track_strands_separately:
+            return False
+        if self._is_initialized != other._is_initialized:
+            return False
+        if self._is_set != other._is_set:
+            return False
+        if self._is_sorted != other._is_sorted:
+            return False
+
+        # kmer_sba_start_indices is nullable
+        if self.kmer_sba_start_indices is None and other.kmer_sba_start_indices is not None:
+            return False
+        elif self.kmer_sba_start_indices is not None and other.kmer_sba_start_indices is None:
+            return False
+        elif not np.array_equal(self.kmer_sba_start_indices, other.kmer_sba_start_indices):
+            return False
+
+        if self.seq_coll != other.seq_coll:
+            return False
+
+        # if this is reached, then they are equal
+        return True
+
+    def save(
+        self,
+        save_file_path: Path,
+        include_sequence_collection: bool = False,
+        format: str = "hdf5",
+        mode: str = "w",
+    ) -> None:
         """
-        Discard repeated kmers keep only unique kmers.
         """
-        pass
+
+        """
+        """
+
+        """
+        """
 
     def get_kmer_str_no_checks(self, kmer_num: int, kmer_strand: str, kmer_len: int) -> str:
         """
