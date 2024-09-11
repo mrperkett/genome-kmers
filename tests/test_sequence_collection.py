@@ -1,3 +1,5 @@
+import os
+import tempfile
 from bisect import bisect_right as builtin_bisect_right
 from collections import namedtuple
 from pathlib import Path
@@ -1782,3 +1784,70 @@ class TestComparisons(TestSequenceCollection):
         assert seq_coll_a == seq_coll_b
         seq_coll_b._strands_loaded = None
         assert not (seq_coll_a == seq_coll_b)
+
+
+class TestSaveLoad(TestSequenceCollection):
+
+    @pytest.fixture
+    def seq_coll_1(self):
+        yield SequenceCollection(sequence_list=self.seq_list_1, strands_to_load="forward")
+
+    @pytest.fixture
+    def seq_coll_2(self):
+        yield SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+
+    def test_save_load_01(self, seq_coll_1):
+        """
+        Test save and load for seq_coll_1 and hdf5 format
+        """
+        seq_coll_a = seq_coll_1
+        with tempfile.NamedTemporaryFile(mode="w") as save_file:
+            seq_coll_a.save(save_file_path=save_file.name, mode="w")
+
+            seq_coll_b = SequenceCollection()
+            seq_coll_b.load(save_file.name, format="hdf5")
+
+        assert seq_coll_a == seq_coll_b
+
+    def test_save_load_02(self, seq_coll_2):
+        """
+        Test save and load for seq_coll_2 and hdf5 format
+        """
+        seq_coll_a = seq_coll_2
+        with tempfile.NamedTemporaryFile(mode="w") as save_file:
+            seq_coll_a.save(save_file_path=save_file.name, mode="w")
+
+            seq_coll_b = SequenceCollection()
+            seq_coll_b.load(save_file.name, format="hdf5")
+
+        assert seq_coll_a == seq_coll_b
+
+    def test_save_load_03(self, seq_coll_1):
+        """
+        Test save and load for seq_coll_1 and shelve format
+        """
+        seq_coll_a = seq_coll_1
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp-shelve.db")
+            seq_coll_a.save(save_file_path=save_file_path, mode="w", format="shelve")
+
+            seq_coll_b = SequenceCollection()
+            seq_coll_b.load(save_file_path, format="shelve")
+            assert True
+
+        assert seq_coll_a == seq_coll_b
+
+    def test_save_load_04(self, seq_coll_2):
+        """
+        Test save and load for seq_coll_2 and shelve format
+        """
+        seq_coll_a = seq_coll_2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_file_path = os.path.join(tmp_dir, "temp-shelve.db")
+            seq_coll_a.save(save_file_path=save_file_path, mode="w", format="shelve")
+
+            seq_coll_b = SequenceCollection()
+            seq_coll_b.load(save_file_path, format="shelve")
+            assert True
+
+        assert seq_coll_a == seq_coll_b
