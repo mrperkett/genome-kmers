@@ -1,8 +1,11 @@
 # from bisect import bisect_right
+import pickle
+import shelve
 from collections import Counter
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Union
 
+import h5py
 import numpy as np
 from numba import jit
 from numba.core import types
@@ -250,8 +253,8 @@ class SequenceCollection:
 
     def __init__(
         self,
-        fasta_file_path: Path = None,
-        sequence_list: list[tuple[str, str]] = None,
+        fasta_file_path: Union[Path, None] = None,
+        sequence_list: Union[list[tuple[str, str]], None] = None,
         strands_to_load: str = "forward",
     ) -> None:
         """
@@ -268,44 +271,27 @@ class SequenceCollection:
             strands_to_load (str, optional): which strand(s) to load into memory.  One
                 of "forward", "reverse_complement", "both". Defaults to "forward".
         """
-        # check provided arguments
-        both_args_are_none = fasta_file_path is not None and sequence_list is not None
-        neither_arg_is_none = fasta_file_path is None and sequence_list is None
-        if both_args_are_none or neither_arg_is_none:
-            raise ValueError(
-                (
-                    "Either fasta_file_path or sequence_list must be specified.  Both"
-                    "cannot be specified."
-                )
-            )
+        # set default parameters based on user arguments
+        self.forward_sba = None
+        self._forward_sba_seg_starts = None
+        self.forward_record_names = None
+        self.revcomp_sba = None
+        self._revcomp_sba_seg_starts = None
+        self.revcomp_record_names = None
+        self._strands_loaded = None
+        self._fasta_file_path = None
 
+        self._initialize_mapping_arrays()
+
+        # if fasta_file_path and sequence_list are both None, do not do any additional initialization
+        if fasta_file_path is None and sequence_list is None:
+            return
+
+        # check provided arguments
+        if fasta_file_path is not None and sequence_list is not None:
+            raise ValueError("Only one of fasta_file_path and sequence_list can be specified")
         if strands_to_load not in ("forward", "reverse_complement", "both"):
             raise ValueError(f"strands_to_load unrecognized ({strands_to_load})")
-
-        # https://www.bioinformatics.org/sms/iupac
-        self._allowed_bases = {
-            "A",
-            "C",
-            "G",
-            "T",
-            "R",
-            "Y",
-            "S",
-            "W",
-            "K",
-            "M",
-            "B",
-            "D",
-            "H",
-            "V",
-            "N",
-            "$",
-        }
-        self._allowed_uint8 = {ord(base) for base in self._allowed_bases}
-
-        # initialize arrays to map from from uint8 to character and vice versa
-        self._complement_mapping_arr = SequenceCollection._get_complement_mapping_array()
-        self._initialize_mapping_arrays()
 
         # load sequence
         if fasta_file_path is not None:
@@ -463,6 +449,30 @@ class SequenceCollection:
         Initialize mappings between uint8 value (the dtype stored in the sequence byte
         arrays) and the u1 value (i.e. unicode char of length 1)
         """
+        # https://www.bioinformatics.org/sms/iupac
+        self._allowed_bases = {
+            "A",
+            "C",
+            "G",
+            "T",
+            "R",
+            "Y",
+            "S",
+            "W",
+            "K",
+            "M",
+            "B",
+            "D",
+            "H",
+            "V",
+            "N",
+            "$",
+        }
+        self._allowed_uint8 = {ord(base) for base in self._allowed_bases}
+
+        # initialize arrays to map from from uint8 to character and vice versa
+        self._complement_mapping_arr = SequenceCollection._get_complement_mapping_array()
+
         self._uint8_to_u1_mapping = np.zeros(256, dtype="U1")
         self._u1_to_uint8_mapping = dict()
         self._numba_unicode_to_uint8_mapping = Dict.empty(
@@ -1187,3 +1197,67 @@ class SequenceCollection:
             )
 
         return get_record_info_from_sba_index
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __eq__(self, other):
+        # NOTE: _fasta_file_path is not required to match for SequenceCollection objects to be equal
+        # forward_sba
+        if self.forward_sba is None and other.forward_sba is not None:
+            return False
+        elif self.forward_sba is not None and other.forward_sba is None:
+            return False
+        elif not np.array_equal(self.forward_sba, other.forward_sba):
+            return False
+
+        # _forward_sba_seg_starts
+        if self._forward_sba_seg_starts is None and other._forward_sba_seg_starts is not None:
+            return False
+        elif self._forward_sba_seg_starts is not None and other._forward_sba_seg_starts is None:
+            return False
+        elif not np.array_equal(self._forward_sba_seg_starts, other._forward_sba_seg_starts):
+            return False
+
+        # forward_record_names
+        if self.forward_record_names is None and other.forward_record_names is not None:
+            return False
+        elif self.forward_record_names is not None and other.forward_record_names is None:
+            return False
+        elif self.forward_record_names != other.forward_record_names:
+            return False
+
+        # revcomp_sba
+        if self.revcomp_sba is None and other.revcomp_sba is not None:
+            return False
+        elif self.revcomp_sba is not None and other.revcomp_sba is None:
+            return False
+        elif not np.array_equal(self.revcomp_sba, other.revcomp_sba):
+            return False
+
+        # _revcomp_sba_seg_starts
+        if self._revcomp_sba_seg_starts is None and other._revcomp_sba_seg_starts is not None:
+            return False
+        elif self._revcomp_sba_seg_starts is not None and other._revcomp_sba_seg_starts is None:
+            return False
+        elif not np.array_equal(self._revcomp_sba_seg_starts, other._revcomp_sba_seg_starts):
+            return False
+
+        # revcomp_record_names
+        if self.revcomp_record_names is None and other.revcomp_record_names is not None:
+            return False
+        elif self.revcomp_record_names is not None and other.revcomp_record_names is None:
+            return False
+        elif self.revcomp_record_names != other.revcomp_record_names:
+            return False
+
+        # _strands_loaded
+        if self._strands_loaded is None and other._strands_loaded is not None:
+            return False
+        elif self._strands_loaded is not None and other._strands_loaded is None:
+            return False
+        elif self._strands_loaded != other._strands_loaded:
+            return False
+
+        # if this is reached, then they are equal
+        return True

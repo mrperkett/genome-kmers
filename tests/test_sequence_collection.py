@@ -95,14 +95,6 @@ class TestInitErrors(TestSequenceCollection):
                 strands_to_load="forward",
             )
 
-    def test_init_error_02(self):
-        """
-        Test that you get a ValueError when attempting to initialize with neither fasta_file_path
-        nor sequence_list provided
-        """
-        with pytest.raises(ValueError):
-            SequenceCollection(strands_to_load="forward")
-
     def test_init_error_03(self):
         """
         Test that you get a ValueError if an unrecognized strands_to_load is passed
@@ -1642,3 +1634,151 @@ class TestOtherMemberFunctions(TestSequenceCollection):
         )
         records = [record for record in seq_coll.iter_records("reverse_complement")]
         assert records == expected_records
+
+
+class TestComparisons(TestSequenceCollection):
+    @pytest.fixture
+    def seq_coll_a(self):
+        yield SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+
+    @pytest.fixture
+    def seq_coll_b(self):
+        yield SequenceCollection(sequence_list=self.seq_list_2, strands_to_load="forward")
+
+    def test_eq_01(self, seq_coll_a, seq_coll_b):
+        """
+        Equal sequence collections
+        """
+        assert seq_coll_a == seq_coll_b
+
+    def test_eq_02(self, seq_coll_a, seq_coll_b):
+        """
+        Equal sequence collections. Differing _fasta_file_path does not impact comparison.
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._fasta_file_path = "some_fasta_file_path"
+        assert seq_coll_a == seq_coll_b
+
+    def test_eq_03(self, seq_coll_a, seq_coll_b):
+        """
+        Differing forward_sba
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.forward_sba = np.array([ord(base) for base in "ATGC"], dtype=np.uint8)
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_04(self, seq_coll_a, seq_coll_b):
+        """
+        Differing forward_sba
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.forward_sba = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_05(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _forward_sba_seg_starts
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._forward_sba_seg_starts = np.array([0, 1, 2], dtype=np.uint32)
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_06(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _forward_sba_seg_starts
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._forward_sba_seg_starts = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_07(self, seq_coll_a, seq_coll_b):
+        """
+        Differing forward_record_names
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.forward_record_names = ["chr1", "chr2", "chr3", "chr4"]
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_08(self, seq_coll_a, seq_coll_b):
+        """
+        Differing forward_record_names
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.forward_record_names = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_09(self, seq_coll_a, seq_coll_b):
+        """
+        Differing revcomp_sba
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.revcomp_sba = np.array([ord(base) for base in "ATGC"], dtype=np.uint8)
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_10(self, seq_coll_a, seq_coll_b):
+        """
+        Differing revcomp_sba
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.revcomp_sba = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_11(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _revcomp_sba_seg_starts
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._revcomp_sba_seg_starts = np.array([0, 1, 2], dtype=np.uint32)
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_12(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _revcomp_sba_seg_starts
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._revcomp_sba_seg_starts = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_13(self, seq_coll_a, seq_coll_b):
+        """
+        Differing revcomp_record_names
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.revcomp_record_names = ["chr1", "chr2", "chr3", "chr4"]
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_14(self, seq_coll_a, seq_coll_b):
+        """
+        Differing revcomp_record_names
+        """
+        seq_coll_a.reverse_complement()
+        seq_coll_b.reverse_complement()
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b.revcomp_record_names = None
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_15(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _strands_loaded
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._strands_loaded = "reverse_complement"
+        assert not (seq_coll_a == seq_coll_b)
+
+    def test_eq_16(self, seq_coll_a, seq_coll_b):
+        """
+        Differing _strands_loaded
+        """
+        assert seq_coll_a == seq_coll_b
+        seq_coll_b._strands_loaded = None
+        assert not (seq_coll_a == seq_coll_b)
