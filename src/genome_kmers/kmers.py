@@ -1,6 +1,8 @@
+import shelve
 from pathlib import Path
 from typing import Callable, Generator, Union
 
+import h5py
 import numba as nb
 import numpy as np
 from numba import jit
@@ -1242,13 +1244,224 @@ class Kmers:
         mode: str = "w",
     ) -> None:
         """
-        """
+        Save Kmers object to file.
 
-        """
-        """
+        Args:
+            save_file_path (Path): path for saved file
+            include_sequence_collection (bool, optional): whether to include sequence collection.
+                Defaults to False.
+            format (str, optional): "hdf5" or "shelve". Defaults to "hdf5".
+            mode (str, optional): mode with which to open file and save information. "w" for write
+                or "a" for append. Defaults to "w".
 
+        Raises:
+            ValueError: format not recognized
         """
+        if format == "hdf5":
+            self._save_hdf5(save_file_path, include_sequence_collection, mode=mode)
+        elif format == "shelve":
+            self._save_shelve(save_file_path, include_sequence_collection)
+        else:
+            raise ValueError(f"format ({format}) not recognized")
+
+    def load(
+        self,
+        load_file_path: Path,
+        seq_coll: Union[SequenceCollection, None] = None,
+        format: str = "hdf5",
+    ) -> None:
         """
+        Load Kmers object from saved file.
+
+        Args:
+            load_file_path (Path): path to file to load.
+            seq_coll (Union[SequenceCollection, None], optional): If provided, seq_coll will be
+                loaded into the kmers object rather than attempting to load from the saved file.
+                Defaults to None.
+            format (str, optional): "hdf5" or "shelve". Defaults to "hdf5".
+
+        Raises:
+            ValueError: format not recognized
+        """
+        if format == "hdf5":
+            self._load_hdf5(load_file_path, seq_coll)
+        elif format == "shelve":
+            self._load_shelve(load_file_path, seq_coll)
+        else:
+            raise ValueError(f"format ({format}) not recognized")
+
+    @staticmethod
+    def _set_for_export(value, value_if_none):
+        """
+        Helper function that converts a None value into the appropriate indicator value if value
+        equals value_if_none. This is used to help deal with the HDF5 format not handling null
+        values.
+
+        Args:
+            value: value we want to pass to serialize with HDF5
+            value_if_none: what to pass to HDF5 instead of value if value is None
+
+        Returns:
+            value_if_none if value is None else value
+        """
+        if value is None:
+            return value_if_none
+        else:
+            return value
+
+    @staticmethod
+    def _correct_import(value, value_if_none):
+        """
+        Helper function that converts a value read from HDF5 to None if it equal to the indicator
+        value value_if_none. This is used to help deal with the HDF5 format not handling null
+        values.
+
+        Args:
+            value: value we want to pass to serialize with HDF5
+            value_if_none: what to pass to HDF5 instead of value if value is None
+
+        Returns:
+            None if value == value_if_none else value
+        """
+        if isinstance(value, np.ndarray):
+            if value.shape == (0,):
+                return None
+        elif value == value_if_none:
+            return None
+        return value
+
+    def _save_hdf5(
+        self, save_file_path: Path, include_sequence_collection: bool = False, mode: str = "w"
+    ) -> None:
+        """
+        Save Kmers object information to HDF5 file format.
+
+        Args:
+            save_file_path (Path): path for saved file
+            include_sequence_collection (bool, optional): whether to include sequence collection.
+                Defaults to False.
+            mode (str, optional): mode with which to open file and save information. "w" for write
+                or "a" for append. Defaults to "w".
+        """
+        with h5py.File(save_file_path, mode) as file:
+            grp = file.create_group("kmers")
+
+            # save all class members to file.  hdf5 does not accept None values. Correct them before
+            # exporting.
+            empty_start_indices = np.array([], dtype=np.uint32)
+
+            grp["min_kmer_len"] = self.min_kmer_len
+            grp["max_kmer_len"] = self._set_for_export(self.max_kmer_len, 0)
+            grp["kmer_source_strand"] = self.kmer_source_strand
+            grp["track_strands_separately"] = self.track_strands_separately
+
+            grp["_is_initialized"] = self._is_initialized
+            grp["_is_set"] = self._is_set
+            grp["_is_sorted"] = self._is_sorted
+            grp["kmer_sba_start_indices"] = self._set_for_export(
+                self.kmer_sba_start_indices, empty_start_indices
+            )
+
+        if include_sequence_collection:
+            self.seq_coll.save(save_file_path, mode="a", format="hdf5")
+
+    def _load_hdf5(
+        self, load_file_path: Path, seq_coll: Union[SequenceCollection, None] = None
+    ) -> None:
+        """
+        Load Kmers object information from HDF5 file format.
+
+        Args:
+            load_file_path (Path): path to file to load.
+            seq_coll (Union[SequenceCollection, None], optional): If provided, seq_coll will be
+                loaded into the kmers object rather than attempting to load from the saved file.
+                Defaults to None.
+        """
+        with h5py.File(load_file_path, "r") as file:
+            grp = file["kmers"]
+
+            # read values from file
+            empty_start_indices = np.array([], dtype=np.uint32)
+
+            self.min_kmer_len = grp["min_kmer_len"][()]
+
+            self.max_kmer_len = self._correct_import(grp["max_kmer_len"][()], 0)
+            self.kmer_source_strand = grp["kmer_source_strand"][()].decode("utf-8")
+            self.track_strands_separately = grp["track_strands_separately"][()]
+
+            self._is_initialized = grp["_is_initialized"][()]
+            self._is_set = grp["_is_set"][()]
+            self._is_sorted = grp["_is_sorted"][()]
+            self.kmer_sba_start_indices = self._correct_import(
+                grp["kmer_sba_start_indices"][:], empty_start_indices
+            )
+
+        if seq_coll is not None:
+            self.seq_coll = seq_coll
+        else:
+            self.seq_coll = SequenceCollection()
+            self.seq_coll.load(load_file_path, format="hdf5")
+
+        return
+
+    def _save_shelve(self, save_file_path: Path, include_sequence_collection: bool = False) -> None:
+        """
+        Save Kmers object information to shelve file format.
+
+        Args:
+            save_file_path (Path): path for saved file
+            include_sequence_collection (bool, optional): whether to include sequence collection.
+                Defaults to False.
+        """
+        with shelve.open(save_file_path) as db:
+
+            db["min_kmer_len"] = self.min_kmer_len
+            db["max_kmer_len"] = self.max_kmer_len
+            db["kmer_source_strand"] = self.kmer_source_strand
+            db["track_strands_separately"] = self.track_strands_separately
+
+            db["_is_initialized"] = self._is_initialized
+            db["_is_set"] = self._is_set
+            db["_is_sorted"] = self._is_sorted
+            db["kmer_sba_start_indices"] = self.kmer_sba_start_indices
+
+            db["_is_initialized"] = self._is_initialized
+            db["kmer_sba_start_indices"] = self.kmer_sba_start_indices
+
+        if include_sequence_collection:
+            self.seq_coll.save(save_file_path, format="shelve")
+
+    def _load_shelve(
+        self, load_file_path: Path, seq_coll: Union[SequenceCollection, None] = None
+    ) -> None:
+        """
+        Load Kmers object information from shelve file format.
+
+        Args:
+            load_file_path (Path): path to file to load.
+            seq_coll (Union[SequenceCollection, None], optional): If provided, seq_coll will be
+                loaded into the kmers object rather than attempting to load from the saved file.
+                Defaults to None.
+        """
+        with shelve.open(load_file_path) as db:
+            self.min_kmer_len = db["min_kmer_len"]
+            self.max_kmer_len = db["max_kmer_len"]
+            self.kmer_source_strand = db["kmer_source_strand"]
+            self.track_strands_separately = db["track_strands_separately"]
+
+            self._is_initialized = db["_is_initialized"]
+            self._is_set = db["_is_set"]
+            self._is_sorted = db["_is_sorted"]
+            self.kmer_sba_start_indices = db["kmer_sba_start_indices"]
+
+            self._is_initialized = db["_is_initialized"]
+            self.kmer_sba_start_indices = db["kmer_sba_start_indices"]
+
+        if seq_coll is None:
+            self.seq_coll = SequenceCollection()
+            self.seq_coll.load(load_file_path, format="shelve")
+        else:
+            self.seq_coll = seq_coll
 
     def get_kmer_str_no_checks(self, kmer_num: int, kmer_strand: str, kmer_len: int) -> str:
         """
