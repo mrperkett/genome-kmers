@@ -9,9 +9,11 @@ import pytest
 from genome_kmers.kmers import (
     Kmers,
     compare_sba_kmers_lexicographically,
+    crispr_ngg_pam_filter,
     gen_kmer_gc_content_filter_func,
     gen_kmer_homopolymer_filter_func,
     gen_kmer_length_filter_func,
+    gen_no_ambiguous_bases_filter,
     get_compare_sba_kmers_func,
     get_kmer_group_size_hist,
     get_kmer_info_group_size_only,
@@ -2377,6 +2379,61 @@ class TestFilters(TestKmers):
         """
         with pytest.raises(ValueError):
             gen_kmer_homopolymer_filter_func(max_homopolymer_size=3, kmer_len=0)
+
+    def test_crispr_ngg_pam_filter(self):
+        """
+        Test crispr_ngg_pam_filter.
+        """
+        # Test sequence
+        #                     0         10        20        30        40        50   55
+        #                     |         |         |         |         |         |    |
+        #                     ATATTTCCATTACCATTACCCGGTACCATTAAGGGACCATTTAACATACCATAAGG
+        #
+        # valid CRISPR guide indices: 0, 11, 12, 33
+        seq_list = [("chr1", "ATATTTCCATTACCATTACCCGGTACCATTAAGGGACCATTTAACATACCATAAGG")]
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+        kmers = Kmers(seq_coll=seq_coll, min_kmer_len=1, max_kmer_len=None, source_strand="forward")
+
+        sba = kmers.seq_coll.forward_sba
+        sba_strand = "forward"
+
+        # valid CRISPR guides sba_start_indices that should pass the filter
+        for kmer_sba_start_idx in (0, 11, 12, 33):
+            assert crispr_ngg_pam_filter(sba, sba_strand, kmer_sba_start_idx)
+
+        # invalid CRISPR guides sba_start_indices that should not pass the filter
+        for kmer_sba_start_idx in (1, 10, 13, 32):
+            assert not crispr_ngg_pam_filter(sba, sba_strand, kmer_sba_start_idx)
+
+    def test_gen_no_ambiguous_bases_filter(self):
+        """
+        Test gen_no_ambiguous_bases_filter for a variety of ambiguous bases.
+        """
+        # Test sequence
+        #                     0         10        20        30        40        50   55
+        #                     |      *  |    **   |         |*        |     *   |    |
+        #                     ATATTTCNATTACCAMBACCCGGTACCATTARGGGACCATTTAACAWACCATAAGG
+        #
+        # ambiguous base indices: 7, 15, 16, 31, 46
+        seq_list = [("chr1", "ATATTTCNATTACCAMBACCCGGTACCATTARGGGACCATTTAACAWACCATAAGG")]
+        seq_coll = SequenceCollection(sequence_list=seq_list, strands_to_load="forward")
+        kmers = Kmers(seq_coll=seq_coll, min_kmer_len=1, max_kmer_len=None, source_strand="forward")
+
+        sba = kmers.seq_coll.forward_sba
+        sba_strand = "forward"
+
+        # build filter for kmer_len=5
+        filter = gen_no_ambiguous_bases_filter(kmer_len=5)
+
+        # valid sba_start_indices that should pass the filter for kmer_len = 5
+        indices = (2, 10, 17, 26, 32, 41, 47, 51)
+        for kmer_sba_start_idx in indices:
+            assert filter(sba, sba_strand, kmer_sba_start_idx)
+
+        # invalid sba_start_indices that should not pass the filter for kmer_len = 5
+        indices = (3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 27, 28, 29, 30, 31, 42, 43, 44, 45, 46)
+        for kmer_sba_start_idx in indices:
+            assert not filter(sba, sba_strand, kmer_sba_start_idx)
 
 
 class TestComparison(TestKmers):

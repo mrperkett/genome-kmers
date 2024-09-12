@@ -192,6 +192,73 @@ def gen_kmer_gc_content_filter_func(
     return filter
 
 
+def gen_no_ambiguous_bases_filter(kmer_len: int) -> Callable:
+    """
+    Generate a filter that checks that only "A", "T", "G", or "C" are present in the kmer.
+
+    Args:
+        kmer_len (int): kmer length
+
+    Raises:
+        ValueError: end of segment or sequence byte array is reached before end of kmer
+
+    Returns:
+        Callable: no_ambiguous_bases_filter
+    """
+
+    @jit
+    def no_ambiguous_bases_filter(sba: np.array, sba_strand: str, kmer_sba_start_idx: int):
+        # check that kmer_len is valid given kmer_sba_start_idx
+        if kmer_sba_start_idx + kmer_len > len(sba):
+            raise ValueError(f"kmer_len ({kmer_len}) is invalid. It extends beyond len(sba)")
+
+        passes = True
+        for i in range(kmer_len):
+            base = sba[kmer_sba_start_idx + i]
+            # check whether the end of the segment has been reached
+            # ord("$") == 36
+            if base == 36:
+                raise ValueError(f"end of segment was reached. kmer_len ({kmer_len}) invalid.")
+            # check if it's not any of A, T, G, C
+            # ord("A") == 65, ord("T") == 84, ord("G") == 71, ord("C") == 67
+            if base != 65 and base != 84 and base != 71 and base != 67:
+                passes = False
+                break
+        return passes
+
+    return no_ambiguous_bases_filter
+
+
+@jit
+def crispr_ngg_pam_filter(sba: np.array, sba_strand: str, kmer_sba_start_idx: int) -> bool:
+    """
+    Generate a filter that passes for all 23-mers ending in GG.
+
+    NOTE: no other checks on kmer validity are carried out.
+
+    Raises:
+        ValueError: kmer extend beyond the size of the sequence byte array
+
+    Returns:
+        bool: whether kmer passes filter or not
+    """
+    # diagram of a SpyCas9 CRISPR guide
+    # 0                  19
+    # |                  |
+    # --------------------NGG
+    # [      target      ]PAM
+
+    # check that arguments are valid
+    if kmer_sba_start_idx + 23 > len(sba):
+        raise ValueError("The guide defined at this start index extends beyond the sba")
+
+    # check whether there is an NGG PAM
+    # ord("G") == 71
+    if sba[kmer_sba_start_idx + 21] == 71 and sba[kmer_sba_start_idx + 22] == 71:
+        return True
+    return False
+
+
 @jit
 def kmer_has_required_len(sba: np.array, sba_start_idx: int, min_kmer_len: int) -> bool:
     """
