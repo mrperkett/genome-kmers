@@ -1,19 +1,26 @@
-.. genome-kmers documentation master file, created by
-   sphinx-quickstart on Thu Jun 13 15:42:11 2024.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to genome-kmers's documentation!
 ========================================
 
-This project contains a collection of classes useful for generating all k-mers in the genome in a memory-efficient manner.  The amount of memory required scales with the genome length, but does not depend on the length of the k-mer.  K-mers are stored as unsigned 32 bit integers that reference their starting location in the genome.  This package makes it simple to load all the k-mers for a fasta-formatted genome file and perform various k-mer calculations including counting the number of unique k-mers.  This package uses `numba <https://numba.pydata.org/>`_ to perform efficient k-mer operations and is orders of magnitude faster than pure Python.
+.. image:: resources/human-genome-kmer-stats.png
+  :width: 600
+  :alt: Distribution of k-mer group size within the human genome as a function of k
+
+.. image:: resources/qualitative-kmer-depiction.png
+  :width: 400
+  :alt: Qualitative depiction of collecting all k-mers
+
+This package contains a collection of classes and methods useful for generating memory efficient *k*-mer statistics for a genome. Qualitatively, all the *k*-mers for a genome can be visualized as the sequence defined by a sliding window of width *k*.
+
+Generating statistics is straightforward for smaller genomes (e.g. counting the number of unique 20-mers), but requires a different computational approach at the size of the human genome, which is around 3e9 base pairs. This package provides an efficient implementation with a simple user interface.
+
 
 .. toctree::
     :maxdepth: 2
 
     Overview <overview>
-    API Reference <genome_kmers>
+    Algorithm <algorithm>
     Examples <examples>
+    API Reference <genome_kmers>
     Development <development>
 
 * :ref:`genindex`

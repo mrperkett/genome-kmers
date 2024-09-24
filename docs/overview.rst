@@ -1,36 +1,115 @@
 Overview
 ########
 
-This Python package implements objects and functions that allow for fast and memory-efficient `k-mer <https://en.wikipedia.org/wiki/K-mer>`_ calculations on the genome.  *k*-mer calculations are useful in a variety of areas in bioinformatics.  This implementation uses a data structure that is independent of the length of the *k-mer*.
+Getting Started
+===============
 
-It allows you to efficiently calculate:
-
-* all unique k-mers in a genome and their frequency
-* all unique k-mers shared between two or more genomes
-
-Potential applications include:
-
-* efficient first-pass at whole genome CRISPR guide design
-
-    * identify all "good" CRISPR guides (i.e. guides that target a genome < N times, N usually equal to 1)
-    * idenfity potential positive controls, which are predicted to kill cells via DNA damage response (i.e. guides that target a genome >N times, usually N > 5)
-    * identify all CRISPR guides that "cross-target" a collection of genomes (i.e. guides that target < N times for each genome)
-
-* efficient first-pass at primer design (i.e. identify all potential primers in the region of interest that target the genome < N times as a first filter on primer design)
-* using to build a suffix trie (though more memory efficient algorithms for this task exist)
-
-
-**NOTE:** This is a alpha release with only ``SequenceCollection`` having been implemented.  ``Kmers`` is in dev and will be released soon.
-
-
-Setup
-=====
+Install genome-kmers using pip.
 
 .. code-block:: bash
 
-    python3 -m pip install genome-kmers
+    # install genome-kmers
+    pip install genome-kmers
 
+Load a sequence from fasta file.
 
+.. code-block:: python
+
+    >>> from genome_kmers.sequence_collection import SequenceCollection
+    >>> seq_coll = SequenceCollection("test_genome.fa")
+
+.. warning::
+    Running calculations for large genomes can take hours.  If you are just testing out this package's functionality, it is recommended to start with a small test genome.  You can generate an example using the snippet below.
+
+    echo -e ">chr1\nATCGAATTAG\n>chr2\nGGATCTTGCATT\n>chr3\nGTGATTGACCCCT" > test_genome.fa
+
+Initialize a Kmers object and sort all the *k*-mers.
+
+.. code-block:: python
+
+    >>> from genome_kmers.kmers import Kmers
+    >>> kmers = Kmers(seq_coll, min_kmer_len=3)
+    >>> kmers.sort()
+
+Print all 3-mers.
+
+.. code-block:: python
+
+    >>> for kmer_info in kmers.get_kmers(kmer_len=3, kmer_info_to_yield="full"):
+    ...    # get kmer sequence
+    ...    kmer_num, strand = kmer_info[0:2]
+    ...    kmer_seq = kmers.get_kmer_str_no_checks(kmer_num, strand, kmer_len=3)
+    ...    print(kmer_seq)
+
+    AAT
+    ACC
+    ATC
+    ATC
+    ATT
+    ATT
+    ATT
+    CAT
+    CCC
+    CCC
+    CCT
+    CGA
+    CTT
+    GAA
+    GAC
+    GAT
+    GAT
+    GCA
+    GGA
+    GTG
+    TAG
+    TCG
+    TCT
+    TGA
+    TGA
+    TGC
+    TTA
+    TTG
+    TTG
+
+Print the first occurrence of 3-mers that occur between 2 and 3 times in the genome.
+
+.. code-block:: python
+
+    >>> gen = kmers.get_kmers(kmer_len=3,
+    ...                       kmer_info_to_yield="full",
+    ...                       min_group_size=2,
+    ...                       max_group_size=3,
+    ...                       yield_first_n=1)
+    >>> for kmer_info in gen:
+    ...    # get kmer sequence
+    ...    kmer_num, strand = kmer_info[0:2]
+    ...    kmer_seq = kmers.get_kmer_str_no_checks(kmer_num, strand, kmer_len=3)
+    ...    print(kmer_seq)
+
+    ATC
+    ATT
+    CCC
+    GAT
+    TGA
+    TTG
+    
+
+Save the sorted kmers object to file.
+
+.. code-block:: python
+
+    >>> kmers.save("test_genome-kmers.hdf5", include_sequence_collection=True)
+
+Load a kmers object from file.
+
+.. code-block:: python
+
+    >>> kmers2 = Kmers()
+    >>> kmers2.load("test_genome-kmers.hdf5")
+    >>> kmers == kmers2
+    True
+
+A more detailed overview of usage is provided in :ref:`Basic Usage <Basic Usage>`.  For example notebooks with worked out calculations, see :ref:`Examples <Examples>`.
 
 Basic usage
 ===========
@@ -149,4 +228,22 @@ The ``Kmer`` class defines a *k-mer* by its ``SequenceCollection`` byte array in
 Kmers
 -----
 
-**NOTE:** ``SequenceCollection`` has been implemented, but ``Kmers`` is in dev and will be released soon.
+
+
+Potential applications
+======================
+
+For notebooks with worked out calculations, see :ref:`Examples <Examples>`.
+
+Potential applications
+
+* calculate all unique k-mers in a genome and their frequency
+* all unique k-mers shared between two or more genomes
+* efficient first-pass at whole genome CRISPR guide design
+
+    * identify all "good" CRISPR guides (i.e. guides that target a genome < N times, N usually equal to 1)
+    * idenfity potential positive controls, which are predicted to kill cells via DNA damage response (i.e. guides that target a genome >N times, usually N > 5)
+    * identify all CRISPR guides that "cross-target" a collection of genomes (i.e. guides that target < N times for each genome)
+
+* efficient first-pass at primer design (i.e. identify all potential primers in the region of interest that target the genome < N times as a first filter on primer design)
+* using to build a suffix trie (though more memory efficient algorithms for this task exist)
