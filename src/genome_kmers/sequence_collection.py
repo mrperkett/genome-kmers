@@ -551,7 +551,7 @@ class SequenceCollection:
                     record_name = SequenceCollection._get_fasta_record_name(line)
                     record_names.append(record_name)
                 else:
-                    sba_chunk = bytearray(line.strip(), "utf-8")
+                    sba_chunk = bytearray(line.strip().upper(), "utf-8")
                     sba[first_empty_idx : first_empty_idx + len(sba_chunk)] = sba_chunk
                     first_empty_idx += len(sba_chunk)
 
