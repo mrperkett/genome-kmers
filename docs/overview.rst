@@ -8,7 +8,6 @@ Install genome-kmers using pip.
 
 .. code-block:: bash
 
-    # install genome-kmers
     pip install genome-kmers
 
 Load a sequence from fasta file.
@@ -21,7 +20,10 @@ Load a sequence from fasta file.
 .. warning::
     Running calculations for large genomes can take hours.  If you are just testing out this package's functionality, it is recommended to start with a small test genome.  You can generate an example using the snippet below.
 
-    echo -e ">chr1\nATCGAATTAG\n>chr2\nGGATCTTGCATT\n>chr3\nGTGATTGACCCCT" > test_genome.fa
+    .. code-block:: bash
+
+        echo -e ">chr1\nATCGAATTAG\n>chr2\nGGATCTTGCATT\n>chr3\nGTGATTGACCCCT" > test_genome.fa
+
 
 Initialize a Kmers object and sort all the *k*-mers.
 
