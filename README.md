@@ -1,5 +1,7 @@
 # Introduction
 
+<img src="docs/resources/human-genome-kmer-stats.png" width="800"/>
+
 This Python package implements objects and functions that allow for fast and memory-efficient [*k*-mer](https://en.wikipedia.org/wiki/K-mer) calculations on the genome.  See the [genome-kmers homepage](https://genome-kmers.readthedocs.io/en/latest/index.html) for a detailed overview, examples, dev setup, and API reference.
 
 This package can be installed via PyPI
